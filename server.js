@@ -32,16 +32,26 @@ if (fs.existsSync(CHAT_LOG_FILE)) {
     }
 }
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
-
-// Restrict `manage.html` access to host only
-app.get('/manage.html', (req, res) => {
-    if (req.ip === hostIP) {
-        res.sendFile(path.join(__dirname, 'manage.html'));
+app.use((req, res, next) => {
+    // Disallow direct access to any HTML file
+    if (req.path.endsWith('.html')) {
+        res.status(404).send(req.path+' Not Found');
     } else {
-        res.status(403).send('Forbidden: You are not authorized.');
+        next();
+    }
+});
+
+// Allow index.html only at root `/`
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Allow manage.html at root `/manage` only for the server's pc
+app.get('/manage', (req, res) => {
+    if (req.ip.includes("::ffff:") ? req.ip.split("::ffff:")[1] : req.ip)
+        res.sendFile(path.join(__dirname, 'public', 'manage.html'));
+    else {
+        res.status(403).send("Forbidden: Access restricted to none local addresses.")
     }
 });
 
@@ -64,13 +74,13 @@ wss.on('connection', (ws, req) => {
 
     ws.isAlive = true;
 
-    ws.on('pong', () => {
-        ws.isAlive = true;
-    });
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            if (data.ping) return
+            if (data.ping) {
+                ws.isAlive = true;
+                return
+            }
 
             if (data.username) {
                 clients.get(clientId).username = data.username;
@@ -107,14 +117,6 @@ wss.on('connection', (ws, req) => {
             console.error('Error parsing message:', error);
         }
     });
-
-    setInterval(() => {
-        wss.clients.forEach((ws) => {
-            if (!ws.isAlive) return ws.terminate();
-            ws.isAlive = false;
-            ws.ping();
-        });
-    }, 30000)
 
     ws.on('close', () => {
         console.log(`Client disconnected: ${clientId}`);
