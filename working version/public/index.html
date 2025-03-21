@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chat</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+        #messages { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; margin-bottom: 10px; }
+        input, button { margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h2>WebSocket Chat</h2>
+    <input type="text" id="username" placeholder="Enter your name">
+    <input type="text" id="host" placeholder="Enter chat host">
+    <button id="joinButton" onclick="joinChat()">Join</button>
+
+    <div id="messages"></div>
+
+    <input type="text" id="messageInput" placeholder="Type a message" disabled>
+    <input type="file" id="fileInput" multiple disabled>
+    <button id="sendButton" onclick="sendMessage()" disabled>Send</button>
+    
+
+    <script>
+        let ws;
+        let username = "";
+        const isValidUrl = urlString=> {
+            var urlPattern = new RegExp('^(https?:\\/\\/)?'+ // validate protocol
+          '((([a-z\\d]([a-z\\d-]*[a-z\\d])*)\\.)+[a-z]{2,}|'+ // validate domain name
+          '((\\d{1,3}\\.){3}\\d{1,3}))'+ // validate OR ip (v4) address
+          '(\\:\\d+)?(\\/[-a-z\\d%_.~+]*)*'+ // validate port and path
+          '(\\?[;&a-z\\d%_.~+=-]*)?'+ // validate query string
+          '(\\#[-a-z\\d_]*)?$','i'); // validate fragment locator
+        return !!urlPattern.test(urlString);
+        }
+
+        function joinChat() {
+            const input = document.getElementById("username");
+            const hostInput = document.getElementById("host");
+            username = input.value.trim();
+            host = hostInput.value.trim();
+
+            if (!username) {
+                alert("Please enter a valid username.");
+                return;
+            }
+
+            if (!host) {
+                alert("Please enter a valid host.");
+                return;
+            }
+
+            input.disabled = true;
+            hostInput.disabled = true;
+            document.getElementById("joinButton").disabled = true;
+            document.getElementById("messageInput").disabled = false;
+            document.getElementById("fileInput").disabled = false;
+            document.getElementById("sendButton").disabled = false;
+
+            ws = new WebSocket(`ws://${host}:8080`);
+
+            ws.onopen = () => {
+                addMessage(`Connected as ${username}`);
+                ws.send(JSON.stringify({ username }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.clearMessages || data.history) {
+                    document.getElementById("messages").innerHTML = "";
+                    if (data.clearMessages) return;
+                }
+
+                console.log(data)
+
+                if (data.history) {
+                    data.history.forEach(msg => displayMessage(msg));
+                } else {
+                    displayMessage(data);
+                }
+            };
+
+            ws.onclose = () => addMessage("WebSocket connection closed.");
+        }
+
+        function sendMessage() {
+            const msg = document.getElementById("messageInput").value.trim();
+            const fileInput = document.getElementById("fileInput");
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert("WebSocket connection not established!");
+                return;
+            }
+
+            if (msg) {
+                ws.send(JSON.stringify({ username, text: msg }));
+                document.getElementById("messageInput").value = "";
+            }
+
+            if (fileInput.files.length > 0) {
+                Array.from(fileInput.files).forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        ws.send(JSON.stringify({
+                            username,
+                            filename: file.name,
+                            fileType: file.type,
+                            result: event.target.result
+                        }));
+                    };
+                    reader.readAsDataURL(file);
+                });
+                fileInput.value = "";
+            }
+        }
+
+        function displayMessage(data) {
+            const messages = document.getElementById("messages");
+            let messageHTML = `<p><strong>${data.username}:</strong> `;
+
+            if (data.type === "file") {
+                if (data.fileType.startsWith("image")) {
+                    messageHTML += `<br><img src="${data.result}" width="200">`;
+                } else if (data.fileType.startsWith("audio")) {
+                    messageHTML += `<br><audio controls><source src="${data.result}" type="${data.fileType}"></audio>`;
+                } else if (data.fileType.startsWith("video")) {
+                    messageHTML += `<br><video width="200" height="200" controls><source src="${data.result}" type="${data.fileType}"></video>`
+                } else {
+                    messageHTML += `<br><a href="${data.result}" download="${data.filename}">${data.filename}</a>`;
+                }
+            } else {
+                if (isValidUrl(data.text)) {
+                    messageHTML += `<a href="${data.text}" target="_blank">${data.text}</a>`;
+                } else {
+                    messageHTML += `${data.text}`;
+                }
+            }
+
+            messageHTML += `</p>`;
+            messages.innerHTML += messageHTML;
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function addMessage(message) {
+            const messages = document.getElementById("messages");
+            messages.innerHTML += `<p>${message}</p>`;
+            messages.scrollTop = messages.scrollHeight;
+        }
+    </script>
+
+</body>
+</html>
