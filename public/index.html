@@ -38,8 +38,8 @@
             break: true
           });
         let ws;
-        let username = "";
         let timestamp = ""
+        let username = "";
         
         const isValidUrl = urlString=> {
             var urlPattern = new RegExp('^(https?:\\/\\/)?'+ // validate protocol
@@ -132,10 +132,17 @@
                 console.log(data)
 
                 if (data.history) {
+                    let timestamp = ""
                     data.history.forEach(msg => displayMessage(msg));
                 } else {
                     displayMessage(data);
-                }
+
+                }setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ ping: "" }));
+                    }
+                }, 30000)
+
             };
 
             ws.onclose = () => addMessage("WebSocket connection closed.");

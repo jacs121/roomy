@@ -61,9 +61,16 @@ wss.on('connection', (ws, req) => {
     // Send chat history to new clients
     ws.send(JSON.stringify({ history: getAnonymizedMessages() }));
 
+
+    ws.isAlive = true;
+
+    ws.on('pong', () => {
+        ws.isAlive = true;
+    });
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
+            if (data.ping) return
 
             if (data.username) {
                 clients.get(clientId).username = data.username;
@@ -100,6 +107,14 @@ wss.on('connection', (ws, req) => {
             console.error('Error parsing message:', error);
         }
     });
+
+    setInterval(() => {
+        wss.clients.forEach((ws) => {
+            if (!ws.isAlive) return ws.terminate();
+            ws.isAlive = false;
+            ws.ping();
+        });
+    }, 30000)
 
     ws.on('close', () => {
         console.log(`Client disconnected: ${clientId}`);
