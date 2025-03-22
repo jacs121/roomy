@@ -11,22 +11,36 @@
     </style>
 </head>
 <body>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
 
+    
+    
     <h2>WebSocket Chat</h2>
     <input type="text" id="username" placeholder="Enter your name">
-    <input type="text" id="host" placeholder="Enter chat host">
     <button id="joinButton" onclick="joinChat()">Join</button>
-
+    
     <div id="messages"></div>
-
+    
     <input type="text" id="messageInput" placeholder="Type a message" disabled>
-    <input type="file" id="fileInput" multiple disabled>
+    <button id="addEmoji" onclick="document.getElementById('emojiPicker').style.display = document.getElementById('emojiPicker').style.display === 'none' ? 'block' : 'none'" disabled>👍</button>
+    <div id="emojiPicker" style="position: absolute; display: none;"></div>
+    <div id="dropZone" disabled>
+        <input type="file" id="fileInput" multiple disabled>
+    </div>
     <button id="sendButton" onclick="sendMessage()" disabled>Send</button>
     
 
     <script>
+        marked.use({
+            pedantic: false,
+            gfm: true,
+            break: true
+          });
         let ws;
+        let timestamp = ""
         let username = "";
+        
         const isValidUrl = urlString=> {
             var urlPattern = new RegExp('^(https?:\\/\\/)?'+ // validate protocol
           '((([a-z\\d]([a-z\\d-]*[a-z\\d])*)\\.)+[a-z]{2,}|'+ // validate domain name
@@ -37,30 +51,70 @@
         return !!urlPattern.test(urlString);
         }
 
+        document.addEventListener("DOMContentLoaded", () => {
+            const emojiPicker = document.getElementById("emojiPicker");
+            const input = document.getElementById("messageInput");
+        
+            // Create Emoji Picker
+            const picker = new EmojiMart.Picker({
+                onEmojiSelect: emoji => {
+                    input.value += emoji.native;
+                }
+            });
+        
+            // Insert the picker into the div
+            emojiPicker.appendChild(picker);
+        
+            // Show picker when input is focused
+            emojiPicker.addEventListener("focus", () => {
+                emojiPicker.style.display = "block";
+            });
+        });
+
+        const dropZone = document.getElementById("dropZone");
+
+        dropZone.addEventListener("dragover", event => {
+            event.preventDefault();
+            dropZone.style.background = "#ddd";
+        });
+
+        dropZone.addEventListener("dragleave", () => {
+            dropZone.style.background = "#fff";
+        });
+
+        dropZone.addEventListener("drop", event => {
+            event.preventDefault();
+            dropZone.style.background = "#fff";
+
+            const files = event.dataTransfer.files;
+            sendFiles(files);
+        });
+
+        function sendFiles(files) {
+            let fileInput = document.getElementById("fileInput")
+            fileInput.files = files
+        }
+
+
         function joinChat() {
             const input = document.getElementById("username");
-            const hostInput = document.getElementById("host");
             username = input.value.trim();
-            host = hostInput.value.trim();
 
             if (!username) {
                 alert("Please enter a valid username.");
                 return;
             }
 
-            if (!host) {
-                alert("Please enter a valid host.");
-                return;
-            }
 
             input.disabled = true;
-            hostInput.disabled = true;
             document.getElementById("joinButton").disabled = true;
             document.getElementById("messageInput").disabled = false;
             document.getElementById("fileInput").disabled = false;
             document.getElementById("sendButton").disabled = false;
+            document.getElementById("addEmoji").disabled = false;
+            document.getElementById("dropZone").disabled = false;
 
-            ws = new WebSocket(`ws://${host}:8080`);
+            ws = new WebSocket(window.location.href.replace("http", "ws"));
 
             ws.onopen = () => {
                 addMessage(`Connected as ${username}`);
@@ -78,10 +132,17 @@
                 console.log(data)
 
                 if (data.history) {
+                    let timestamp = ""
                     data.history.forEach(msg => displayMessage(msg));
                 } else {
                     displayMessage(data);
-                }
+
+                }setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ ping: "" }));
+                    }
+                }, 30000)
+
             };
 
             ws.onclose = () => addMessage("WebSocket connection closed.");
@@ -97,11 +158,12 @@
             }
 
             if (msg) {
-                ws.send(JSON.stringify({ username, text: msg }));
+                document.getElementById("emojiPicker").style.display = "none";
+                ws.send(JSON.stringify({ username, text: msg.replace("\\n", "<br>") }));
                 document.getElementById("messageInput").value = "";
             }
-
             if (fileInput.files.length > 0) {
+                document.getElementById("emojiPicker").style.display = "none";
                 Array.from(fileInput.files).forEach(file => {
                     const reader = new FileReader();
                     reader.onload = (event) => {
@@ -120,7 +182,11 @@
 
         function displayMessage(data) {
             const messages = document.getElementById("messages");
-            let messageHTML = `<p><strong>${data.username}:</strong> `;
+            let messageHTML = `<p><strong>[${data.username}] </strong> `;
+            if (data.timestamp !== timestamp) {
+                messageHTML = `<span style="font-size:0.8em;color:gray;">(${data.timestamp})</span>` + messageHTML
+            }
+            timestamp = data.timestamp
 
             if (data.type === "file") {
                 if (data.fileType.startsWith("image")) {
@@ -133,11 +199,7 @@
                     messageHTML += `<br><a href="${data.result}" download="${data.filename}">${data.filename}</a>`;
                 }
             } else {
-                if (isValidUrl(data.text)) {
-                    messageHTML += `<a href="${data.text}" target="_blank">${data.text}</a>`;
-                } else {
-                    messageHTML += `${data.text}`;
-                }
+                messageHTML += `${marked.parseInline(data.text)}</p>`;
             }
 
             messageHTML += `</p>`;

@@ -17,7 +17,8 @@
     <button onclick="clearMessages()">Clear Messages</button>
     <button onclick="saveChat()">Save Chat</button>
     <button onclick="updateClients()">Update Clients</button>
-
+    <input type="checkbox" id="anonymous">anonymous
+    
     <h2>Connected Clients</h2>
     <div id="clientList"></div>
 
@@ -25,6 +26,15 @@
     <div id="messages"></div>
 
     <script>
+        document.getElementById("anonymous").addEventListener("change", (event) => {
+            console.log(event.target.checked)
+            fetch('/anonymous', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({anonymous: event.target.checked})
+            })
+        })
+
         function updateClients() {
             fetch('/clients')
                 .then(response => response.json())
@@ -34,11 +44,22 @@
                     clients.forEach(client => {
                         const div = document.createElement('div');
                         div.innerHTML = `<strong>${client.username}</strong> (IP: ${client.ip})
-                            <button onclick="kickClient('${client.clientId}')">Kick</button>`;
+                            <button onclick="kickClient('${client.clientId}')">Kick</button>
+                            <button onclick="banClient('${client.ip}')">ban</button>`;
                         clientListElement.appendChild(div);
                     });
                 });
         }
+
+        function banClient(ip) {
+            fetch('/ban-client', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip })
+            }).then(() => updateClients());
+        }
+        
+        
 
         function fetchMessages() {
             fetch('/chat-log')

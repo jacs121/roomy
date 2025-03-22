@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
+
+    <input type="text" id="emojiInput" placeholder="Type here...">
+    <div id="emojiPicker" style="position: absolute; display: none;"></div>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const emojiPicker = document.getElementById("emojiPicker");
+            const inputField = document.getElementById("emojiInput");
+        
+            // Create Emoji Picker
+            const picker = new EmojiMart.Picker({
+                onEmojiSelect: emoji => {
+                    inputField.value += emoji.native;
+                }
+            });
+        
+            // Insert the picker into the div
+            emojiPicker.appendChild(picker);
+        
+            // Show picker when input is focused
+            inputField.addEventListener("focus", () => {
+                emojiPicker.style.display = "block";
+            });
+        
+            // Hide picker when clicking outside
+            document.addEventListener("click", (event) => {
+                if (!emojiPicker.contains(event.target) && event.target !== inputField) {
+                    emojiPicker.style.display = "none";
+                }
+            });
+        });
+        </script>
+        
+</body>
+</html>

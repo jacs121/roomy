@@ -20,6 +20,8 @@ const hostIP = Object.values(os.networkInterfaces())
 // Store clients and chat history
 const clients = new Map();
 let messageHistory = [];
+let settings = {anonymous: false}
+let bannedIPs = [];
 
 // Load previous chat history
 if (fs.existsSync(CHAT_LOG_FILE)) {
@@ -30,51 +32,86 @@ if (fs.existsSync(CHAT_LOG_FILE)) {
     }
 }
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
-
-// Restrict `manage.html` access to host only
-app.get('/manage.html', (req, res) => {
-    if (req.ip === hostIP) {
-        res.sendFile(path.join(__dirname, 'manage.html'));
+app.use((req, res, next) => {
+    // Disallow direct access to any HTML file
+    if (req.path.endsWith('.html')) {
+        res.status(404).send(req.path+' Not Found');
     } else {
-        res.status(403).send('Forbidden: You are not authorized.');
+        next();
+    }
+});
+
+// Allow index.html only at root `/`
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Allow manage.html at root `/manage` only for the server's pc
+app.get('/manage', (req, res) => {
+    if (req.ip.includes("::ffff:") ? req.ip.split("::ffff:")[1] : req.ip)
+        res.sendFile(path.join(__dirname, 'public', 'manage.html'));
+    else {
+        res.status(403).send("Forbidden: Access restricted to none local addresses.")
     }
 });
 
 // **Handle WebSocket Connections**
 wss.on('connection', (ws, req) => {
-    const clientId = Math.random().toString(36).substring(7);
-    clients.set(clientId, { ws, ip: req.socket.remoteAddress, username: "Unknown" });
+    const clientIp = req.socket.remoteAddress;
+    if (bannedIPs.includes(clientIp)) {
+        ws.close();
+        return;
+    }
 
-    console.log(`New client connected! ID: ${clientId}, IP: ${req.socket.remoteAddress}`);
+    const clientId = Math.random().toString(36).substring(7);
+    clients.set(clientId, { ws, ip: clientIp, username: "Unknown" });
+
+    console.log(`New client connected! ID: ${clientId}, IP: ${clientIp}`);
 
     // Send chat history to new clients
-    ws.send(JSON.stringify({ history: messageHistory }));
+    ws.send(JSON.stringify({ history: getAnonymizedMessages() }));
+
+
+    ws.isAlive = true;
 
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
+            if (data.ping) {
+                ws.isAlive = true;
+                return
+            }
 
             if (data.username) {
                 clients.get(clientId).username = data.username;
             }
+            let date = new Date()
 
             if (data.text) {
-                const msgData = { username: data.username, text: data.text, type: "text" };
+                let msgData = { 
+                    username: data.username, 
+                    text: data.text, 
+                    type: "text",
+                    timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
+                };
                 messageHistory.push(msgData);
-                broadcast(msgData);
+                if (settings.anonymous) {
+                    msgData.username = "ANONYMOUS"
+                }
+
+
+                broadcast({history: getAnonymizedMessages()});
             } else if (data.filename && data.result) {
-                const fileData = {
+                let fileData = {
                     username: data.username,
                     filename: data.filename,
                     fileType: data.fileType,
                     result: data.result,  
-                    type: "file"
+                    type: "file",
+                    timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
                 };
                 messageHistory.push(fileData);
-                broadcast(fileData);
+                broadcast({history: getAnonymizedMessages()});
             }
         } catch (error) {
             console.error('Error parsing message:', error);
@@ -86,6 +123,13 @@ wss.on('connection', (ws, req) => {
         clients.delete(clientId);
     });
 });
+
+function getAnonymizedMessages() {
+    return messageHistory.map(msg => ({
+        ...msg,
+        username: settings.anonymous ? "ANONYMOUS" : msg.username
+    }));
+}
 
 // **Broadcast to All Clients**
 function broadcast(data) {
@@ -100,6 +144,22 @@ function broadcast(data) {
 app.get('/clients', (req, res) => {
     res.json(Array.from(clients, ([clientId, { ip, username }]) => ({ clientId, ip, username })));
 });
+
+app.post('/ban-client', (req, res) => {
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ success: false, message: 'No IP provided' });
+    
+    bannedIPs.push(ip);
+    clients.forEach(({ ws, ip: clientIP }, clientId) => {
+        if (clientIP === ip) {
+            ws.close();
+            clients.delete(clientId);
+        }
+    });
+
+    res.json({ success: true, message: `IP ${ip} has been banned.` });
+});
+
 
 // **API to Get Chat Logs**
 app.get('/chat-log', (req, res) => {
@@ -123,6 +183,14 @@ app.post('/clear-messages', (req, res) => {
     res.json({ success: true, message: 'Messages cleared' });
 });
 
+
+// **API to turn on anonymous mode**
+app.post('/anonymous', (req, res) => {
+    settings.anonymous = req.body.anonymous === true; // Convert properly
+    broadcast({ history: getAnonymizedMessages() });
+    res.json({ success: true, message: `Anonymous mode is ${settings.anonymous}` });
+});
+
 // **API to Kick a Client**
 app.post('/kick-client', (req, res) => {
     const { clientId } = req.body;
@@ -141,7 +209,7 @@ app.post('/delete-message', (req, res) => {
     const { index } = req.body;
     if (index >= 0 && index < messageHistory.length) {
         messageHistory.splice(index, 1);
-        broadcast({ history: messageHistory });
+        broadcast({history: getAnonymizedMessages()});
         res.json({ success: true, message: 'Message deleted' });
     } else {
         res.status(400).json({ success: false, message: 'Invalid message index' });
