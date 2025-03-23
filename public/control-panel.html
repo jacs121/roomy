@@ -14,6 +14,11 @@
 <body>
 
     <h1>Control Panel</h1>
+    <input type="text" id="newPath" placeholder="New path (e.g. Main/Sub1)">
+    <button onclick="addCategory()">Add Category</button>
+    <button onclick="addRoom()">Add Room</button>
+    <select id="pathSelect" onchange="updateRooms()"></select>
+
     <button onclick="clearMessages()">Clear Messages</button>
     <button onclick="saveChat()">Save Chat</button>
     <button onclick="updateClients()">Update Clients</button>
@@ -26,9 +31,48 @@
     <div id="messages"></div>
 
     <script>
+        async function loadPaths() {
+            let res = await fetch('/paths');
+            let paths = await res.json();
+            let pathSelect = document.getElementById('pathSelect');
+    
+            function renderPaths(node, prefix = "") {
+                return Object.keys(node).map(key => {
+                    if (key === "__room") return "";
+                    let newPath = prefix ? `${prefix}/${key}` : key;
+                    return `<option value="${newPath}">${newPath}</option>` + renderPaths(node[key], newPath);
+                }).join('');
+            }
+    
+            pathSelect.innerHTML = renderPaths(paths);
+        }
+
+        function fetchRoomData() {
+            selectedPath = document.getElementById("pathSelect").value;
+            updateClients();
+            fetchMessages();
+        }
+
+        function addCategory() {
+            fetch('/add-category', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: document.getElementById('newPath').value })
+            }).then(loadPaths);
+        }
+    
+        function addRoom() {
+            fetch('/add-room', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: document.getElementById('newPath').value })
+            }).then(loadPaths);
+        }
+    
+
         document.getElementById("anonymous").addEventListener("change", (event) => {
             console.log(event.target.checked)
-            fetch('/anonymous', {
+            fetch(`/anonymous/${selectedPath}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({anonymous: event.target.checked})
@@ -36,83 +80,56 @@
         })
 
         function updateClients() {
-            fetch('/clients')
+            fetch(`/clients/${selectedPath}`)
+            .then(response => response.json())
+            .then(clients => {
+                const clientListElement = document.getElementById('clientList');
+                clientListElement.innerHTML = '';
+                clients.forEach(client => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<strong>${client.username}</strong>
+                        <button onclick="kickClient('${client.clientId}')">Kick</button>
+                        <button onclick="banClient('${client.ip}')">Ban</button>`;
+                    clientListElement.appendChild(div);
+                });
+            });
+        }
+
+        function fetchMessages() {
+            fetch(`/chat-logs/${selectedPath}`)
                 .then(response => response.json())
-                .then(clients => {
-                    const clientListElement = document.getElementById('clientList');
-                    clientListElement.innerHTML = '';
-                    clients.forEach(client => {
+                .then(messages => {
+                    const messagesContainer = document.getElementById('messages');
+                    messagesContainer.innerHTML = '';
+                    messages.forEach(msg => {
                         const div = document.createElement('div');
-                        div.innerHTML = `<strong>${client.username}</strong> (IP: ${client.ip})
-                            <button onclick="kickClient('${client.clientId}')">Kick</button>
-                            <button onclick="banClient('${client.ip}')">ban</button>`;
-                        clientListElement.appendChild(div);
+                        div.innerHTML = `<strong>${msg.username}:</strong> ${msg.text}`;
+                        messagesContainer.appendChild(div);
                     });
                 });
         }
 
         function banClient(ip) {
-            fetch('/ban-client', {
+            fetch(`/ban-client/${selectedPath}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ip })
             }).then(() => updateClients());
         }
         
-        
-
-        function fetchMessages() {
-            fetch('/chat-log')
-                .then(response => response.json())
-                .then(messages => {
-                    const messagesContainer = document.getElementById('messages');
-                    messagesContainer.innerHTML = '';
-                    messages.forEach((msg, index) => {
-                        const div = document.createElement('div');
-                        div.classList.add('message');
-
-                        let messageHTML = `<strong>${msg.username}:</strong> `;
-                        if (msg.type === "file") {
-                            if (msg.fileType.startsWith("image")) {
-                                messageHTML += `<br><img src="${msg.result}" width="100">`;
-                            } else if (msg.fileType.startsWith("audio")) {
-                                messageHTML += `<br><audio controls><source src="${msg.result}" type="${msg.fileType}"></audio>`;
-                            } else {
-                                messageHTML += `<br><a href="${msg.result}" download="${msg.filename}">${msg.filename}</a>`;
-                            }
-                        } else {
-                            messageHTML += msg.text;
-                        }
-
-                        div.innerHTML = messageHTML;
-
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.textContent = 'X';
-                        deleteBtn.classList.add('delete-btn');
-                        deleteBtn.onclick = () => deleteMessage(index);
-                        div.appendChild(deleteBtn);
-
-                        messagesContainer.appendChild(div);
-                    });
-                });
-        }
-
         function clearMessages() {
-            fetch('/clear-messages', { method: 'POST' })
+            fetch(`/clear-messages/${selectedPath}`, { method: 'POST' })
                 .then(() => document.getElementById('messages').innerHTML = '');
         }
-
-        function deleteMessage(index) {
-            fetch('/delete-message', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index })
-            })
-            .then(fetchMessages);
+    
+        function saveChat() {
+        fetch('/save-chat', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => alert(data.message));
         }
-
+        
         function kickClient(clientId) {
-            fetch('/kick-client', {
+            fetch(`/kick-client/${selectedPath}`, {  // Send request with room path
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ clientId })
@@ -120,16 +137,11 @@
             .then(response => response.json())
             .then(data => {
                 console.log(data.message);
-                updateClients();
+                updateClients();  // Refresh the client list
             });
         }
 
-        function saveChat() {
-            fetch('/save-chat', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => alert(data.message));
-        }
-
+        loadPaths();
         setInterval(updateClients, 5000);
         setInterval(fetchMessages, 5000);
     </script>
