@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket Chat</title>
+    <title>Socket Chat</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
         #messages { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; margin-bottom: 10px; }
@@ -14,9 +14,9 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
 
+
     
-    
-    <h2>WebSocket Chat</h2>
+    <h2>Socket Chat</h2>
     <input type="text" id="username" placeholder="Enter your name">
     <button id="joinButton" onclick="joinChat()">Join</button>
     
@@ -199,7 +199,7 @@
                     messageHTML += `<br><a href="${data.result}" download="${data.filename}">${data.filename}</a>`;
                 }
             } else {
-                messageHTML += `${marked.parseInline(data.text)}</p>`;
+                messageHTML += `${marked.parseInline(data.text)}`;
             }
 
             messageHTML += `</p>`;

@@ -9,7 +9,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const CHAT_LOG_FILE = "chat-history.json";
+const CHAT_LOG_FILE = "SC-history.json";
 
 // Get host IP address
 const hostIP = Object.values(os.networkInterfaces())
@@ -26,7 +26,10 @@ let bannedIPs = [];
 // Load previous chat history
 if (fs.existsSync(CHAT_LOG_FILE)) {
     try {
-        messageHistory = JSON.parse(fs.readFileSync(CHAT_LOG_FILE, "utf8"));
+        let chat = JSON.parse(fs.readFileSync(CHAT_LOG_FILE, "utf8"));
+        messageHistory = chat.messageHistory
+        settings = chat.settings
+        bannedIPs = bannedIPs
     } catch (err) {
         console.error("Error loading chat history:", err);
     }
@@ -43,13 +46,13 @@ app.use((req, res, next) => {
 
 // Allow index.html only at root `/`
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'chat.html'));
 });
 
 // Allow manage.html at root `/manage` only for the server's pc
-app.get('/manage', (req, res) => {
+app.get('/control-panel', (req, res) => {
     if (req.ip.includes("::ffff:") ? req.ip.split("::ffff:")[1] : req.ip)
-        res.sendFile(path.join(__dirname, 'public', 'manage.html'));
+        res.sendFile(path.join(__dirname, 'public', 'control panel.html'));
     else {
         res.status(403).send("Forbidden: Access restricted to none local addresses.")
     }
@@ -169,10 +172,10 @@ app.get('/chat-log', (req, res) => {
 // **API to Save Chat History**
 app.post('/save-chat', (req, res) => {
     try {
-        fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify(messageHistory, null, 2));
-        res.json({ success: true, message: 'Chat history saved!' });
+        fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify({messageHistory, bannedIPs, settings}, null, 2));
+        res.json({ success: true, message: 'Chat saved!' });
     } catch (err) {
-        res.status(500).json({ success: false, message: 'Failed to save chat history.' });
+        res.status(500).json({ success: false, message: 'Failed to save chat.' });
     }
 });
 
