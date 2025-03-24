@@ -15,13 +15,12 @@
 
     <h1>Control Panel</h1>
     <input type="text" id="newPath" placeholder="New path (e.g. Main/Sub1)">
-    <button onclick="addCategory()">Add Category</button>
     <button onclick="addRoom()">Add Room</button>
-    <select id="pathSelect" onchange="fetchRoomData()"></select>
+    <select id="pathSelect" onchange="await fetchRoomData()"></select>
 
-    <button onclick="clearMessages()">Clear Messages</button>
-    <button onclick="saveChat()">Save Chat</button>
-    <button onclick="updateClients()">Update Clients</button>
+    <button onclick="await clearMessages()">Clear Messages</button>
+    <button onclick="await saveChat()">Save Chat</button>
+    <button onclick="await updateClients()">Update Clients</button>
     <input type="checkbox" id="anonymous">anonymous
     
     <h2>Connected Clients</h2>
@@ -31,8 +30,10 @@
     <div id="messages"></div>
 
     <script>
+        let selectedPath = ""
+
         async function loadPaths() {
-            let res = await fetch('/paths');
+            let res = await fetch('/paths', {method: 'GET'});
             let paths = await res.json();
             let pathSelect = document.getElementById('pathSelect');
     
@@ -47,18 +48,10 @@
             pathSelect.innerHTML = renderPaths(paths);
         }
 
-        function fetchRoomData() {
+        async function fetchRoomData() {
             selectedPath = document.getElementById("pathSelect").value;
-            updateClients();
-            fetchMessages();
-        }
-
-        function addCategory() {
-            fetch('/add-category', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: document.getElementById('newPath').value })
-            }).then(loadPaths);
+            await updateClients();
+            await fetchMessages();
         }
     
         function addRoom() {
@@ -68,24 +61,24 @@
                 body: JSON.stringify({ path: document.getElementById('newPath').value })
             }).then(loadPaths);
         }
-    
 
-        document.getElementById("anonymous").addEventListener("change", (event) => {
+
+        document.getElementById("anonymous").addEventListener("change", async (event) => {
             console.log(event.target.checked)
-            fetch(`/anonymous/${selectedPath}`, {
-                method: 'POST',
+            await fetch(`/anonymous/${selectedPath}`, {
+                method: 'GET',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({anonymous: event.target.checked})
             })
         })
 
-        function updateClients() {
-            fetch(`/clients/${selectedPath}`)
+        async function updateClients() {
+            await fetch(`/clients/${selectedPath}`, {method: 'GET'})
             .then(response => response.json())
-            .then(clients => {
+            .then(data => {
                 const clientListElement = document.getElementById('clientList');
                 clientListElement.innerHTML = '';
-                clients.forEach(client => {
+                data.forEach(client => {
                     const div = document.createElement('div');
                     div.innerHTML = `<strong>${client.username}</strong>
                         <button onclick="kickClient('${client.clientId}')">Kick</button>
@@ -96,8 +89,8 @@
             });
         }
 
-        function fetchMessages() {
-            fetch(`/chat-logs/${selectedPath}`)
+        async function fetchMessages() {
+            await fetch(`/chat-logs/${selectedPath}`, {method: 'GET'})
                 .then(response => response.json())
                 .then(messages => {
                     const messagesContainer = document.getElementById('messages');
@@ -126,13 +119,13 @@
             }).then(() => updateClients());
         }
         
-        function clearMessages() {
-            fetch(`/clear-messages/${selectedPath}`, { method: 'POST' })
+        async function clearMessages() {
+            await fetch(`/clear-messages/${selectedPath}`, { method: 'GET' })
                 .then(() => document.getElementById('messages').innerHTML = '');
         }
     
-        function saveChat() {
-        fetch('/save-chat', { method: 'POST' })
+        async function saveChat() {
+            await fetch('/save-chat', { method: 'GET' })
             .then(response => response.json())
             .then(data => alert(data.message));
         }

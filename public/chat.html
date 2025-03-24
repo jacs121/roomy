@@ -17,8 +17,7 @@
 
     
     <h2>Socket Chat</h2>
-    <label for="category">Path:</label>
-    <select id="pathSelect" onchange="updateRooms()"></select>
+    <select id="pathSelect" onchange="updateRooms(this.options[this.selectedIndex].value)"></select>
     <input type="text" id="username" placeholder="Enter your name">
     <button id="joinButton" onclick="joinChat()">Join</button>
     
@@ -42,9 +41,10 @@
         let ws;
         let timestamp = ""
         let username = "";
+        let selectedPath = ""
         
         async function loadPaths() {
-            let res = await fetch('/paths');
+            let res = await fetch('/paths', {method: 'GET'});
             let paths = await res.json();
             let pathSelect = document.getElementById('pathSelect');
     
@@ -57,6 +57,12 @@
             }
     
             pathSelect.innerHTML = renderPaths(paths);
+            updateRooms(pathSelect.options[pathSelect.selectedIndex].value)
+        }
+
+        function updateRooms(choice) {
+            let pathSelect = document.getElementById('pathSelect');
+            selectedPath = choice
         }
 
         document.addEventListener("DOMContentLoaded", () => {
@@ -104,14 +110,16 @@
         }
 
 
-        function joinChat() {
+        async function joinChat() {
             const input = document.getElementById("username");
             username = input.value.trim();
             let usernames = []
-            fetch(`/clients/${path}`)
-                .then(response => response.json())
-                .then(clients => {usernames.push(client.username)})
-            if (!roomName || !username) {
+            await fetch(`/clients/${selectedPath}`, {method: 'GET'})
+            .then(response => response.json())
+            .then(data => {data.forEach(client => {
+                usernames.push(client.username)
+            })})
+            if (!selectedPath || !username) {
                 alert("Please enter a room name and a username.");
                 return;
             }
@@ -133,8 +141,8 @@
             ws = new WebSocket(window.location.href.replace("http", "ws"));
 
             ws.onopen = () => {
-                addMessage(`Connected as ${username} in path ${selectedPath}`);
-                ws.send(JSON.stringify({ path: selectedPath, username }));
+                addMessage(`Connected as ${username} in room ${selectedPath}`);
+                ws.send(JSON.stringify({ path: selectedPath, username: username }));
             };
 
 

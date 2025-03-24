@@ -53,7 +53,7 @@ if (fs.existsSync(CHAT_LOG_FILE)) {
 // Handle WebSocket connections
 wss.on('connection', (ws, req) => {
     const clientId = Math.random().toString(36).substring(7);
-    connectedUsers.set(clientId, { ws, username: "Unknown" , roomPath: ""})
+    Object.assign(connectedUsers, clientId, { ws, username: "Unknown" , roomPath: path})
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
@@ -75,12 +75,16 @@ wss.on('connection', (ws, req) => {
                 return
             }
 
+            if (!room.clients.has(clientId)) {
+                room.clients.set(clientId, { ws, username: "Unknown" });
+            }
+            
             if (data.username) {
                 room.clients.get(clientId).username = data.username;
             }
-
+            
             room.clients.set(clientId, { ws, username: username || "Unknown" });
-            connectedUsers.set(clientId, { ws, username: username || "Unknown" , roomPath: path})
+            Object.assign(connectedUsers, clientId, { ws, username: username || "Unknown" , roomPath: path})
 
             console.log(`New client in path: ${path}, ID: ${clientId}`);
 
@@ -160,16 +164,6 @@ function isAdmin(req) {
 // Get the structure of paths
 app.get('/paths', (req, res) => {
     res.json(paths);
-});
-
-// Add a new category (Admin Only)
-app.post('/add-category', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
-
-    const { path } = req.body;
-    createPath(path);
-    res.json({ success: true, message: `Category ${path} added.` });
-    broadcastAll("paths", path)
 });
 
 // Add a new chat room (Admin Only)
@@ -295,8 +289,8 @@ app.post('/kick-client/:path', (req, res) => {
 
 function broadcastAll(type, data) {
     for (i=0; i <= connectedUsers.length; i++) {
-        if (connectedUsers[i].readyState === WebSocket.OPEN) {
-            connectedUsers[i].send(JSON.stringify({type, data}));
+        if (connectedUsers[i].ws.readyState === WebSocket.OPEN) {
+            connectedUsers[i].ws.send(JSON.stringify({type, data}));
         }
     };
 }
