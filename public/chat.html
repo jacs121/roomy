@@ -141,18 +141,23 @@
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
 
-                if (data.clearMessages || data.history) {
+                if (data.type === "paths") {
+                    loadPaths(data.data.paths)
+                    return
+                }
+
+                if (data.type === "clear" || data.type === "message") {
                     document.getElementById("messages").innerHTML = "";
-                    if (data.clearMessages) return;
+                    if (data.data.clearMessages) return;
                 }
 
                 console.log(data)
 
-                if (data.history) {
+                if (data.type === "clear") {
                     let timestamp = ""
-                    data.history.forEach(msg => displayMessage(msg));
+                    data.data.history.forEach(msg => displayMessage(msg));
                 } else {
-                    displayMessage(data);
+                    displayMessage(data.data);
 
                 }setInterval(() => {
                     if (ws && ws.readyState === WebSocket.OPEN) {

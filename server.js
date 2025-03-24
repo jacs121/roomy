@@ -11,6 +11,8 @@ const wss = new WebSocket.Server({ server });
 
 const CHAT_LOG_FILE = "SC-history.json";
 const paths = {}; // Store nested paths of categories and rooms
+const connectedUsers = {}
+const glBannedIPs = []
 
 // Get host IP address
 const hostIP = Object.values(os.networkInterfaces())
@@ -40,7 +42,8 @@ app.get('/control-panel', (req, res) => {
 if (fs.existsSync(CHAT_LOG_FILE)) {
     try {
         let chatData = JSON.parse(fs.readFileSync(CHAT_LOG_FILE, "utf8"));
-        Object.assign(rooms, chatData);
+        Object.assign(paths, chatData.paths);
+        Object.assign(glBannedIPs, chatData.glBannedIPs);
     } catch (err) {
         console.error("Error loading chat history:", err);
     }
@@ -50,6 +53,7 @@ if (fs.existsSync(CHAT_LOG_FILE)) {
 // Handle WebSocket connections
 wss.on('connection', (ws, req) => {
     const clientId = Math.random().toString(36).substring(7);
+    connectedUsers.set(clientId, { ws, username: "Unknown" , roomPath: ""})
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
@@ -61,7 +65,7 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
-            if (room.bannedIPs.includes(req.socket.remoteAddress)) {
+            if (room.bannedIPs.includes(req.socket.remoteAddress) || glBannedIPs.includes(req.socket.remoteAddress)) {
                 ws.close();
                 return;
             }
@@ -76,6 +80,7 @@ wss.on('connection', (ws, req) => {
             }
 
             room.clients.set(clientId, { ws, username: username || "Unknown" });
+            connectedUsers.set(clientId, { ws, username: username || "Unknown" , roomPath: path})
 
             console.log(`New client in path: ${path}, ID: ${clientId}`);
 
@@ -90,7 +95,7 @@ wss.on('connection', (ws, req) => {
                     timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
                 };
                 room.messages.push(msgData);
-                broadcast(path, { history: getAnonymizedMessages(path) });
+                broadcast("messages", path, { history: getAnonymizedMessages(path) });
             } else if (data.filename && data.result) {
                 const fileData = {
                     username: username,
@@ -101,7 +106,7 @@ wss.on('connection', (ws, req) => {
                     timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
                 };
                 room.messages.push(fileData);
-                broadcast(path, { history: getAnonymizedMessages(path) });
+                broadcast("messages", path, { history: getAnonymizedMessages(path) });
             }
         } catch (error) {
             console.error('Error parsing message:', error);
@@ -137,11 +142,11 @@ function getAnonymizedMessages(path) {
     })) : [];
 }
 
-function broadcast(path, data) {
+function broadcast(type, path, data) {
     let room = getRoom(path);
     room?.clients.forEach(({ ws }) => {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(data));
+            ws.send(JSON.stringify({type, data}));
         }
     });
 }
@@ -164,6 +169,7 @@ app.post('/add-category', (req, res) => {
     const { path } = req.body;
     createPath(path);
     res.json({ success: true, message: `Category ${path} added.` });
+    broadcastAll("paths", path)
 });
 
 // Add a new chat room (Admin Only)
@@ -175,10 +181,9 @@ app.post('/add-room', (req, res) => {
     node.__room = { clients: new Map(), messages: [], settings: { anonymous: false }, bannedIPs: [] };
 
     res.json({ success: true, message: `Room ${path} added.` });
+    broadcastAll("paths", path)
 });
 
-
-// **RESTORED API ROUTES BELOW**
 
 // Get connected clients in a room
 app.get('/clients/:path', (req, res) => {
@@ -200,7 +205,7 @@ app.post('/clear-messages/:path', (req, res) => {
     let room = getRoom(path);
     if (room) {
         room.messages = [];
-        broadcast(path, { clearMessages: true });
+        broadcast("clear", path, { clearMessages: true });
         res.json({ success: true, message: `Messages cleared for room ${path}` });
     } else {
         res.status(400).json({ success: false, message: 'Room not found' });
@@ -225,10 +230,26 @@ app.post('/ban-client/:path', (req, res) => {
     res.json({ success: true, message: `IP ${ip} has been banned from room ${path}` });
 });
 
+// Ban a user from a room
+app.post('/gl-ban-client/', (req, res) => {
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ success: false, message: 'Invalid IP' });
+
+    glBannedIPs.push(ip);
+    connectedUsers.forEach(({ ws, ip: clientIP }, clientId) => {
+        if (clientIP === ip) {
+            ws.close();
+            connectedUsers.delete(clientId);
+        }
+    });
+
+    res.json({ success: true, message: `IP ${ip} has been banned from the server` });
+});
+
 // Save chat history
 app.post('/save-chat', (req, res) => {
     try {
-        fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify(paths, null, 2));
+        fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify({paths: paths, glBannedIPs: glBannedIPs}, null, 2));
         res.json({ success: true, message: 'Chat saved!' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to save chat.' });
@@ -254,7 +275,7 @@ app.post('/anonymous/:path', (req, res) => {
     const path = req.params.path;
     let room = getRoom(path);
     room.settings.anonymous = req.body.anonymous === true;
-    broadcast(path, { history: getAnonymizedMessages(path) });
+    broadcast("anonymous", path, { history: getAnonymizedMessages(path) });
     res.json({ success: true, message: `Anonymous mode is ${room.settings.anonymous}` });
 });
 
@@ -272,6 +293,13 @@ app.post('/kick-client/:path', (req, res) => {
     }
 });
 
+function broadcastAll(type, data) {
+    for (i=0; i <= connectedUsers.length; i++) {
+        if (connectedUsers[i].readyState === WebSocket.OPEN) {
+            connectedUsers[i].send(JSON.stringify({type, data}));
+        }
+    };
+}
 
 server.listen(8080, () => {
     console.log(`Server running on http://${hostIP}:8080`);

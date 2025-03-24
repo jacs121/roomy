@@ -89,7 +89,8 @@
                     const div = document.createElement('div');
                     div.innerHTML = `<strong>${client.username}</strong>
                         <button onclick="kickClient('${client.clientId}')">Kick</button>
-                        <button onclick="banClient('${client.ip}')">Ban</button>`;
+                        <button onclick="banClient('${client.ip}')">Ban</button>
+                        <button onclick="globalBanClient('${client.ip}')">GL Ban</button>`;
                     clientListElement.appendChild(div);
                 });
             });
@@ -111,6 +112,14 @@
 
         function banClient(ip) {
             fetch(`/ban-client/${selectedPath}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip })
+            }).then(() => updateClients());
+        }
+
+        function globalBanClient(ip) {
+            fetch(`/gl-ban-client/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ip })
