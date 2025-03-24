@@ -10,19 +10,20 @@
         .message { display: flex; justify-content: space-between; align-items: center; }
         .delete-btn { background-color: red; color: white; border: none; padding: 5px; cursor: pointer; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
 
     <h1>Control Panel</h1>
     <input type="text" id="newPath" placeholder="New path (e.g. Main/Sub1)">
     <button onclick="addRoom()">Add Room</button>
-    <select id="pathSelect" onchange="await fetchRoomData()"></select>
+    <select id="pathSelect" onchange="fetchRoomData()"></select>
 
-    <button onclick="await clearMessages()">Clear Messages</button>
-    <button onclick="await saveChat()">Save Chat</button>
-    <button onclick="await updateClients()">Update Clients</button>
-    <input type="checkbox" id="anonymous">anonymous
-    
+    <button onclick="clearMessages()" id="clearMessages" disabled>Clear Messages</button>
+    <button onclick="saveChat()" disabled>Save Chat</button>
+    <button onclick="updateClients()" disabled>Update Clients</button>
+    <input type="checkbox" id="anonymous" disabled>anonymous
+
     <h2>Connected Clients</h2>
     <div id="clientList"></div>
 
@@ -31,6 +32,12 @@
 
     <script>
         let selectedPath = ""
+        let timestamp = ""
+        marked.use({
+            pedantic: false,
+            gfm: true,
+            break: true
+          });
 
         async function loadPaths() {
             let res = await fetch('/paths', {method: 'GET'});
@@ -46,6 +53,18 @@
             }
     
             pathSelect.innerHTML = renderPaths(paths);
+            if (pathSelect.options.length > 0) {
+                document.getElementById("anonymous").disabled = false
+                document.getElementById("clearMessages").disabled = false
+                document.getElementById("saveChat").disabled = false
+                document.getElementById("updateClients").disabled = false
+                fetchRoomData()
+            } else {
+                document.getElementById("anonymous").disabled = true
+                document.getElementById("clearMessages").disabled = true
+                document.getElementById("saveChat").disabled = true
+                document.getElementById("updateClients").disabled = true
+            }
         }
 
         async function fetchRoomData() {
@@ -53,24 +72,27 @@
             await updateClients();
             await fetchMessages();
         }
-    
+
         function addRoom() {
-            fetch('/add-room', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: document.getElementById('newPath').value })
-            }).then(loadPaths);
+            let path = document.getElementById('newPath').value 
+            if (path !== "") {
+                fetch('/add-room', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path })
+                }).then(loadPaths);
+            }
         }
 
 
         document.getElementById("anonymous").addEventListener("change", async (event) => {
-            console.log(event.target.checked)
             await fetch(`/anonymous/${selectedPath}`, {
-                method: 'GET',
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({anonymous: event.target.checked})
-            })
-        })
+                body: JSON.stringify({ anonymous: event.target.checked })
+            });
+        });
+
 
         async function updateClients() {
             await fetch(`/clients/${selectedPath}`, {method: 'GET'})
@@ -95,12 +117,36 @@
                 .then(messages => {
                     const messagesContainer = document.getElementById('messages');
                     messagesContainer.innerHTML = '';
-                    messages.forEach(msg => {
-                        const div = document.createElement('div');
-                        div.innerHTML = `<strong>${msg.username}:</strong> ${msg.text}`;
-                        messagesContainer.appendChild(div);
-                    });
+                    timestamp = ""
+                    messages.forEach(msg => {displayMessage(msg)});
                 });
+        }
+
+        function displayMessage(data) {
+            const messages = document.getElementById("messages");
+            let messageHTML = `<p><strong>[${data.username}] </strong> `;
+            if (data.timestamp !== timestamp) {
+                messageHTML = `<span style="font-size:0.8em;color:gray;">(${data.timestamp})</span>` + messageHTML
+            }
+            timestamp = data.timestamp
+
+            if (data.type === "file") {
+                if (data.fileType.startsWith("image")) {
+                    messageHTML += `<br><img src="${data.result}" width="200">`;
+                } else if (data.fileType.startsWith("audio")) {
+                    messageHTML += `<br><audio controls><source src="${data.result}" type="${data.fileType}"></audio>`;
+                } else if (data.fileType.startsWith("video")) {
+                    messageHTML += `<br><video width="200" height="200" controls><source src="${data.result}" type="${data.fileType}"></video>`
+                } else {
+                    messageHTML += `<br><a href="${data.result}" download="${data.filename}">${data.filename}</a>`;
+                }
+            } else {
+                messageHTML += `${marked.parse(data.text)}`;
+            }
+
+            messageHTML += `</p>`;
+            messages.innerHTML += messageHTML;
+            messages.scrollTop = messages.scrollHeight;
         }
 
         function banClient(ip) {
@@ -118,18 +164,20 @@
                 body: JSON.stringify({ ip })
             }).then(() => updateClients());
         }
-        
+
         async function clearMessages() {
-            await fetch(`/clear-messages/${selectedPath}`, { method: 'GET' })
+            await fetch(`/clear-messages/${selectedPath}`, { method: 'POST' })
                 .then(() => document.getElementById('messages').innerHTML = '');
         }
-    
+
         async function saveChat() {
-            await fetch('/save-chat', { method: 'GET' })
-            .then(response => response.json())
-            .then(data => alert(data.message));
+            await fetch('/save-chat', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => alert(data.message));
         }
-        
+
+
+
         function kickClient(clientId) {
             fetch(`/kick-client/${selectedPath}`, {  // Send request with room path
                 method: 'POST',
@@ -142,8 +190,16 @@
                 updateClients();  // Refresh the client list
             });
         }
-
+        setInterval(() => {
+            loadPaths();
+            if (pathSelect.options.length > 0) {
+                fetchRoomData()
+            }
+        }, 5000);
         loadPaths();
+            if (pathSelect.options.length > 0) {
+                fetchRoomData()
+            }
     </script>
 
 </body>

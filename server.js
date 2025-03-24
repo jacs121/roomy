@@ -53,16 +53,41 @@ if (fs.existsSync(CHAT_LOG_FILE)) {
 // Handle WebSocket connections
 wss.on('connection', (ws, req) => {
     const clientId = Math.random().toString(36).substring(7);
-    Object.assign(connectedUsers, clientId, { ws, username: "Unknown" , roomPath: path})
+    connectedUsers[clientId] = { ws, username: "Unknown", roomPath: "" };
+
+    ws.on("close", () => {
+        let room = getRoom(connectedUsers[clientId].roomPath)
+        room.clients.delete(clientId);
+        delete connectedUsers[clientId];
+    });
+
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            const { path, username } = data;
+            
+            if (data.type === "ping") {
+                ws.isAlive = true;
+                return
+            }
+
+            console.log(data)
+            const {path, username } = data;
             let room = getRoom(path);
+
+            if (!room.clients.has(clientId)) {
+                room.clients.set(clientId, { ws, username: "Unknown" });
+                console.log(`New client in path: ${path}, ID: ${clientId}`);
+            }
 
             if (!room) {
                 ws.close();
                 return;
+            }
+
+            if (data.type === "join") {
+                room.clients.get(clientId).username = username;
+                // Send chat history to the new client
+                ws.send(JSON.stringify({ data: {history: getMessages(path)} }));
             }
 
             if (room.bannedIPs.includes(req.socket.remoteAddress) || glBannedIPs.includes(req.socket.remoteAddress)) {
@@ -70,47 +95,30 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
-            if (data.ping) {
-                ws.isAlive = true;
-                return
-            }
 
-            if (!room.clients.has(clientId)) {
-                room.clients.set(clientId, { ws, username: "Unknown" });
-            }
-            
-            if (data.username) {
-                room.clients.get(clientId).username = data.username;
-            }
-            
             room.clients.set(clientId, { ws, username: username || "Unknown" });
-            Object.assign(connectedUsers, clientId, { ws, username: username || "Unknown" , roomPath: path})
-
-            console.log(`New client in path: ${path}, ID: ${clientId}`);
-
-            // Send chat history to the new client
-            ws.send(JSON.stringify({ history: getAnonymizedMessages(path) }));
+            connectedUsers[clientId] = { ws, username: username || "Unknown" , roomPath: path}
             
             let date = new Date()
-            if (data.text) {
+            if (data.type === "message") {
                 const msgData = {
                     username: room.settings.anonymous ? "ANONYMOUS" : username,
                     text: data.text,
-                    timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
+                    timestamp: `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
                 };
                 room.messages.push(msgData);
-                broadcast("messages", path, { history: getAnonymizedMessages(path) });
-            } else if (data.filename && data.result) {
+                broadcast("message", path, { history: getMessages(path) });
+            } else if (data.type === "file") {
                 const fileData = {
                     username: username,
                     filename: data.filename,
                     fileType: data.fileType,
                     result: data.result,
                     type: "file",
-                    timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
+                    timestamp: `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
                 };
                 room.messages.push(fileData);
-                broadcast("messages", path, { history: getAnonymizedMessages(path) });
+                broadcast("message", path, { history: getMessages(path) });
             }
         } catch (error) {
             console.error('Error parsing message:', error);
@@ -122,7 +130,7 @@ function getRoom(path) {
     let parts = path.split("/");
     let node = paths;
     for (let part of parts) {
-        if (!node[part]) return null;
+        if (!node[part]) return createPath(path); // Create the room if it doesn't exist
         node = node[part];
     }
     return node.__room || null;
@@ -138,7 +146,7 @@ function createPath(path) {
     return node;
 }
 
-function getAnonymizedMessages(path) {
+function getMessages(path) {
     let room = getRoom(path);
     return room ? room.messages.map(msg => ({
         ...msg,
@@ -148,6 +156,7 @@ function getAnonymizedMessages(path) {
 
 function broadcast(type, path, data) {
     let room = getRoom(path);
+    console.log({type, data})
     room?.clients.forEach(({ ws }) => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({type, data}));
@@ -175,7 +184,7 @@ app.post('/add-room', (req, res) => {
     node.__room = { clients: new Map(), messages: [], settings: { anonymous: false }, bannedIPs: [] };
 
     res.json({ success: true, message: `Room ${path} added.` });
-    broadcastAll("paths", path)
+    broadcastAll("paths", paths)
 });
 
 
@@ -183,18 +192,25 @@ app.post('/add-room', (req, res) => {
 app.get('/clients/:path', (req, res) => {
     const path = req.params.path;
     let room = getRoom(path);
-    res.json(room ? Array.from(room.clients, ([clientId, { ip, username }]) => ({ clientId, ip, username })) : []);
+    if (!room || room.length === 0 || !room.clients || room.clients.length === 0) {
+        res.json([])
+    } else {
+        let data = Array.from(room.clients, ([clientId, { ip, username }]) => { clientId, ip, username })
+        res.json(data);
+    }
 });
 
 // Get chat logs from a room
 app.get('/chat-logs/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
-    res.json(room?.messages || []);
+    res.json(room ? room.messages : []);
 });
 
 // Clear all messages in a room
 app.post('/clear-messages/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     if (room) {
@@ -208,15 +224,16 @@ app.post('/clear-messages/:path', (req, res) => {
 
 // Ban a user from a room
 app.post('/ban-client/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     const { ip } = req.body;
     if (!ip || !room) return res.status(400).json({ success: false, message: 'Invalid room or IP' });
 
     room.bannedIPs.push(ip);
-    room.clients.forEach(({ ws, ip: clientIP }, clientId) => {
-        if (clientIP === ip) {
-            ws.close();
+    room.clients.forEach((client, clientId) => {
+        if (client.ip === ip) {
+            client.ws.close();
             room.clients.delete(clientId);
         }
     });
@@ -226,14 +243,17 @@ app.post('/ban-client/:path', (req, res) => {
 
 // Ban a user from a room
 app.post('/gl-ban-client/', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const { ip } = req.body;
     if (!ip) return res.status(400).json({ success: false, message: 'Invalid IP' });
 
     glBannedIPs.push(ip);
-    connectedUsers.forEach(({ ws, ip: clientIP }, clientId) => {
-        if (clientIP === ip) {
-            ws.close();
-            connectedUsers.delete(clientId);
+    connectedUsers.forEach((client, clientId) => {
+        if (client.ip === ip) {
+            client.ws.close();
+            let room = getRoom(connectedUsers[clientId].roomPath)
+            room.clients.delete(clientId);
+            delete connectedUsers[clientId]
         }
     });
 
@@ -242,6 +262,7 @@ app.post('/gl-ban-client/', (req, res) => {
 
 // Save chat history
 app.post('/save-chat', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     try {
         fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify({paths: paths, glBannedIPs: glBannedIPs}, null, 2));
         res.json({ success: true, message: 'Chat saved!' });
@@ -252,12 +273,13 @@ app.post('/save-chat', (req, res) => {
 
 // Delete a specific message from a room
 app.post('/delete-message/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     const { index } = req.body;
     if (index >= 0 && index < room.messages.length) {
         room.messages.splice(index, 1);
-        broadcast(path, { history: getAnonymizedMessages(path) });
+        broadcast("clear", path, { history: getMessages(path) });
         res.json({ success: true, message: 'Message deleted' });
     } else {
         res.status(400).json({ success: false, message: 'Invalid message index' });
@@ -266,19 +288,22 @@ app.post('/delete-message/:path', (req, res) => {
 
 // Toggle anonymous mode
 app.post('/anonymous/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     room.settings.anonymous = req.body.anonymous === true;
-    broadcast("anonymous", path, { history: getAnonymizedMessages(path) });
+    broadcast("anonymous", path, { history: getMessages(path) });
     res.json({ success: true, message: `Anonymous mode is ${room.settings.anonymous}` });
 });
 
 // Kick a user from a room
 app.post('/kick-client/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     const { clientId } = req.body;
     if (room.clients.has(clientId)) {
+        delete connectedUsers[clientId]
         room.clients.get(clientId).ws.close();
         room.clients.delete(clientId);
         res.json({ success: true, message: `Client ${clientId} kicked.` });
@@ -288,12 +313,13 @@ app.post('/kick-client/:path', (req, res) => {
 });
 
 function broadcastAll(type, data) {
-    for (i=0; i <= connectedUsers.length; i++) {
-        if (connectedUsers[i].ws.readyState === WebSocket.OPEN) {
-            connectedUsers[i].ws.send(JSON.stringify({type, data}));
+    Object.values(connectedUsers).forEach(({ ws }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type, data }));
         }
-    };
+    });
 }
+
 
 server.listen(8080, () => {
     console.log(`Server running on http://${hostIP}:8080`);

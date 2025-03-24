@@ -57,7 +57,9 @@
             }
     
             pathSelect.innerHTML = renderPaths(paths);
-            updateRooms(pathSelect.options[pathSelect.selectedIndex].value)
+            if (pathSelect.options.length > 0) {
+                updateRooms(pathSelect.options[pathSelect.selectedIndex].value)
+            }
         }
 
         function updateRooms(choice) {
@@ -119,6 +121,7 @@
             .then(data => {data.forEach(client => {
                 usernames.push(client.username)
             })})
+
             if (!selectedPath || !username) {
                 alert("Please enter a room name and a username.");
                 return;
@@ -138,11 +141,16 @@
             document.getElementById("addEmoji").disabled = false;
             document.getElementById("dropZone").disabled = false;
 
-            ws = new WebSocket(window.location.href.replace("http", "ws"));
+            ws = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host);
 
             ws.onopen = () => {
                 addMessage(`Connected as ${username} in room ${selectedPath}`);
-                ws.send(JSON.stringify({ path: selectedPath, username: username }));
+                ws.send(JSON.stringify({type: "join",  path: selectedPath, username: username }));
+                setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "ping" }));
+                    }
+                }, 30000);
             };
 
 
@@ -154,25 +162,13 @@
                     return
                 }
 
-                if (data.type === "clear" || data.type === "message") {
-                    document.getElementById("messages").innerHTML = "";
-                    if (data.data.clearMessages) return;
-                }
-
-                console.log(data)
-
-                if (data.type === "clear") {
+                document.getElementById("messages").innerHTML = "";
+                
+                if (data.type === "clear" || data.type === "anonymous") {
                     let timestamp = ""
-                    data.data.history.forEach(msg => displayMessage(msg));
-                } else {
-                    displayMessage(data.data);
-
-                }setInterval(() => {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ ping: "" }));
-                    }
-                }, 30000)
-
+                }
+                if (data.type !== "clear" )
+                data.data.history.forEach(msg => displayMessage(msg));
             };
 
             ws.onclose = () => addMessage("WebSocket connection closed.");
@@ -189,7 +185,7 @@
 
             if (msg) {
                 document.getElementById("emojiPicker").style.display = "none";
-                ws.send(JSON.stringify({path: selectedPath, username, text: msg.replace("\\n", "<br>") }));
+                ws.send(JSON.stringify({type: "message", path: selectedPath, username, text: msg}));
                 document.getElementById("messageInput").value = "";
             }
             if (fileInput.files.length > 0) {
@@ -198,6 +194,8 @@
                     const reader = new FileReader();
                     reader.onload = (event) => {
                         ws.send(JSON.stringify({
+                            type: "file",
+                            path: selectedPath, 
                             username,
                             filename: file.name,
                             fileType: file.type,
@@ -229,7 +227,7 @@
                     messageHTML += `<br><a href="${data.result}" download="${data.filename}">${data.filename}</a>`;
                 }
             } else {
-                messageHTML += `${marked.parseInline(data.text)}`;
+                messageHTML += `${marked.parse(data.text.replace(/\n/g, "<br>") )}`;
             }
 
             messageHTML += `</p>`;
@@ -242,6 +240,11 @@
             messages.innerHTML += `<p>${message}</p>`;
             messages.scrollTop = messages.scrollHeight;
         }
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                loadPaths();
+            }
+        }, 5000);
         loadPaths();
     </script>
 
