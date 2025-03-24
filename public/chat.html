@@ -108,7 +108,7 @@
             const input = document.getElementById("username");
             username = input.value.trim();
             let usernames = []
-            fetch(`/clients${path}`)
+            fetch(`/clients/${path}`)
                 .then(response => response.json())
                 .then(clients => {usernames.push(client.username)})
             if (!roomName || !username) {

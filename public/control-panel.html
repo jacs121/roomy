@@ -17,7 +17,7 @@
     <input type="text" id="newPath" placeholder="New path (e.g. Main/Sub1)">
     <button onclick="addCategory()">Add Category</button>
     <button onclick="addRoom()">Add Room</button>
-    <select id="pathSelect" onchange="updateRooms()"></select>
+    <select id="pathSelect" onchange="fetchRoomData()"></select>
 
     <button onclick="clearMessages()">Clear Messages</button>
     <button onclick="saveChat()">Save Chat</button>
@@ -142,8 +142,6 @@
         }
 
         loadPaths();
-        setInterval(updateClients, 5000);
-        setInterval(fetchMessages, 5000);
     </script>
 
 </body>
