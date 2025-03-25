@@ -7,7 +7,7 @@
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
         #clientList, #messages { border: 1px solid #ccc; padding: 10px; margin-top: 10px; max-width: 600px; margin-left: auto; margin-right: auto; }
-        .message { display: flex; justify-content: space-between; align-items: center; }
+        .message { display: flex; justify-content: space-between; }
         .delete-btn { background-color: red; color: white; border: none; padding: 5px; cursor: pointer; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -30,7 +30,7 @@
     <h2>Chat Messages</h2>
     <div id="messages"></div>
 
-    <script>
+    <script async="true">
         let selectedPath = ""
         let timestamp = ""
         marked.use({
@@ -39,9 +39,9 @@
             break: true
           });
 
-        function loadPaths() {
-            let res = fetch('/paths', {method: 'GET'});
-            let paths = res.json();
+        async function loadPaths() {
+            let res = await fetch('/paths', {method: 'GET'});
+            let paths = await res.json();
             let pathSelect = document.getElementById('pathSelect');
     
             function renderPaths(node, prefix = "") {
@@ -86,7 +86,7 @@
 
 
         document.getElementById("anonymous").addEventListener("change", async (event) => {
-            await fetch(`/anonymous/${selectedPath}`, {
+            fetch(`/anonymous/${selectedPath}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ anonymous: event.target.checked })
@@ -96,12 +96,16 @@
 
         async function updateClients() {
             await fetch(`/clients/${selectedPath}`, {method: 'GET'})
-            .then(response => response.json())
+            .then(async response => {
+                let res = await response.json()
+                return res
+            })
             .then(data => {
                 const clientListElement = document.getElementById('clientList');
                 clientListElement.innerHTML = '';
                 for (i=0; i < data.length; i++) {
                     let client = data[i]
+                    console.log(client)
                     const div = document.createElement('div');
                     div.innerHTML = `<strong>${client.username}</strong>
                         <button onclick="kickClient('${client.clientId}')">Kick</button>
@@ -113,23 +117,28 @@
         }
 
         async function fetchMessages() {
-            await fetch(`/chat-logs/${selectedPath}`, { method: 'GET' }) // Should be GET, not POST
-                .then(res => res.json()) // ✅ Return res.json()
+            fetch(`/chat-logs/${selectedPath}`, { method: 'GET' })
+            .then(async response => {
+                let res = await response.json()
+                return res
+            })
                 .then(data => {
                     document.getElementById("messages").innerHTML = "";
                     timestamp = ""
                     for (i=0; i < data.length; i++) {
-                        displayMessage(data[i])
+                        displayMessage(data[i], i)
                     }
                 })
                 .catch(error => console.error("Error fetching messages:", error));
         }
 
-        function displayMessage(data) {
+        function displayMessage(data, index) {
             const messages = document.getElementById("messages");
+            const div = document.createElement('div');
+            div.classList.add('message');
             let messageHTML = `<p><strong>[${data.username}] </strong> `;
             if (data.timestamp !== timestamp) {
-                messageHTML = `<span style="font-size:0.8em;color:gray;">(${data.timestamp})</span>` + messageHTML
+                div.innerHTML = `<span style="font-size:0.8em;color:gray;">(${data.timestamp})</span>`
             }
             timestamp = data.timestamp
 
@@ -145,10 +154,11 @@
                 }
             } else {
                 messageHTML += `${marked.parse(data.text)}`;
+                messageHTML = messageHTML.slice(0, messageHTML.length-5)
             }
+            div.innerHTML += messageHTML+"\t"+`<button class="delete-btn" onclick="deleteMessage(${index})">X</button>`;
 
-            messageHTML += `</p>`;
-            messages.innerHTML += messageHTML;
+            messages.innerHTML += div.innerHTML;
             messages.scrollTop = messages.scrollHeight;
         }
 
@@ -158,6 +168,15 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ip })
             }).then(() => updateClients());
+        }
+
+        function deleteMessage(index) {
+            fetch(`/delete-message/${selectedPath}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index })
+            })
+            .then(fetchMessages);
         }
 
         function globalBanClient(ip) {
@@ -182,6 +201,7 @@
 
 
         function kickClient(clientId) {
+            console.log(clientId)
             fetch(`/kick-client/${selectedPath}`, {  // Send request with room path
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -189,12 +209,11 @@
             })
             .then(response => response.json())
             .then(data => {
-                console.log(data.message);
                 updateClients();  // Refresh the client list
             });
         }
-        setInterval(() => {
-            loadPaths();
+        setInterval(async () => {
+            await loadPaths();
             if (pathSelect.options.length > 0) {
                 fetchRoomData()
             }

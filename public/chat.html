@@ -32,7 +32,7 @@
     <button id="sendButton" onclick="sendMessage()" disabled>Send</button>
     
 
-    <script>
+    <script async>
         marked.use({
             pedantic: false,
             gfm: true,
@@ -46,11 +46,12 @@
         async function loadPaths() {
             let res = await fetch('/paths', {method: 'GET'});
             let paths = await res.json();
+            console.log(paths)
             let pathSelect = document.getElementById('pathSelect');
     
             function renderPaths(node, prefix = "") {
                 return Object.keys(node).map(key => {
-                    if (key === "__room") return "";
+                    if (key === "_room_") return "";
                     let newPath = prefix ? `${prefix}/${key}` : key;
                     return `<option value="${newPath}">${newPath}</option>` + renderPaths(node[key], newPath);
                 }).join('');
@@ -118,9 +119,12 @@
             let usernames = []
             await fetch(`/clients/${selectedPath}`, {method: 'GET'})
             .then(response => response.json())
-            .then(data => {data.forEach(client => {
-                usernames.push(client.username)
-            })})
+            .then(data => {
+                console.log(data)
+                for (client in data) {
+                    usernames.push(client.username)
+                }
+            })
 
             if (!selectedPath || !username) {
                 alert("Please enter a room name and a username.");
@@ -151,6 +155,12 @@
                         ws.send(JSON.stringify({ type: "ping" }));
                     }
                 }, 30000);
+
+                ws.send(JSON.stringify({
+                    type: "join",
+                    path: selectedPath, 
+                    username
+                }));
             };
 
 
@@ -158,7 +168,8 @@
                 const data = JSON.parse(event.data);
 
                 if (data.type === "paths") {
-                    loadPaths(data.data.paths)
+                    loadPaths(data.paths)
+                    console.log(data.data)
                     return
                 }
 
@@ -168,7 +179,9 @@
                     let timestamp = ""
                 }
                 if (data.type !== "clear" )
-                data.data.history.forEach(msg => displayMessage(msg));
+                data.data.history.forEach(msg => {
+                    displayMessage(msg)
+                });
             };
 
             ws.onclose = () => addMessage("WebSocket connection closed.");
@@ -240,11 +253,6 @@
             messages.innerHTML += `<p>${message}</p>`;
             messages.scrollTop = messages.scrollHeight;
         }
-        setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                loadPaths();
-            }
-        }, 5000);
         loadPaths();
     </script>
 
