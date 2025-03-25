@@ -70,7 +70,6 @@ wss.on('connection', (ws, req) => {
                 return
             }
 
-            console.log(data)
             const {path, username } = data;
             let room = getRoom(path);
 
@@ -129,22 +128,43 @@ wss.on('connection', (ws, req) => {
 function getRoom(path) {
     let parts = path.split("/");
     let node = paths;
-    for (let part of parts) {
-        if (!node[part]) return createPath(path); // Create the room if it doesn't exist
-        node = node[part];
+
+    for (let i = 0; i < parts.length; i++) {
+        let part = parts[i];
+
+        // If the part does not exist, create an empty object
+        if (!node[part]) {
+            node[part] = (i === parts.length - 1) 
+                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false }, bannedIPs: []}}
+                : {}; // Intermediate objects
+        }
+
+        node = node[part]; // Move deeper into the object
     }
-    return node.__room || null;
+    
+    return node
 }
 
-function createPath(path) {
+function createRoom(path) {
     let parts = path.split("/");
     let node = paths;
-    for (let part of parts) {
-        if (!node[part]) node[part] = {};
-        node = node[part];
+
+    for (let i = 0; i < parts.length; i++) {
+        let part = parts[i];
+
+        // If the part does not exist, create an empty object
+        if (!node[part]) {
+            node[part] = (i === parts.length - 1) 
+                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false }, bannedIPs: []}}
+                : {}; // Intermediate objects
+        }
+
+        node = node[part]; // Move deeper into the object
     }
-    return node;
+    console.log(paths)
 }
+
+
 
 function getMessages(path) {
     let room = getRoom(path);
@@ -180,8 +200,7 @@ app.post('/add-room', (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
 
     const { path } = req.body;
-    let node = createPath(path);
-    node.__room = { clients: new Map(), messages: [], settings: { anonymous: false }, bannedIPs: [] };
+    createRoom(path);
 
     res.json({ success: true, message: `Room ${path} added.` });
     broadcastAll("paths", paths)
@@ -200,13 +219,15 @@ app.get('/clients/:path', (req, res) => {
     }
 });
 
-// Get chat logs from a room
 app.get('/chat-logs/:path', (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    
     const path = req.params.path;
     let room = getRoom(path);
-    res.json(room ? room.messages : []);
+    
+    res.json(room ? room.messages : []); // ✅ No need for JSON.stringify
 });
+
 
 // Clear all messages in a room
 app.post('/clear-messages/:path', (req, res) => {

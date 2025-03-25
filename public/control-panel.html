@@ -20,8 +20,8 @@
     <select id="pathSelect" onchange="fetchRoomData()"></select>
 
     <button onclick="clearMessages()" id="clearMessages" disabled>Clear Messages</button>
-    <button onclick="saveChat()" disabled>Save Chat</button>
-    <button onclick="updateClients()" disabled>Update Clients</button>
+    <button onclick="saveChat()" id="saveChat" disabled>Save Chat</button>
+    <button onclick="updateClients()" id="updateClients" disabled>Update Clients</button>
     <input type="checkbox" id="anonymous" disabled>anonymous
 
     <h2>Connected Clients</h2>
@@ -39,14 +39,14 @@
             break: true
           });
 
-        async function loadPaths() {
-            let res = await fetch('/paths', {method: 'GET'});
-            let paths = await res.json();
+        function loadPaths() {
+            let res = fetch('/paths', {method: 'GET'});
+            let paths = res.json();
             let pathSelect = document.getElementById('pathSelect');
     
             function renderPaths(node, prefix = "") {
                 return Object.keys(node).map(key => {
-                    if (key === "__room") return "";
+                    if (key === "_room_") return "";
                     let newPath = prefix ? `${prefix}/${key}` : key;
                     return `<option value="${newPath}">${newPath}</option>` + renderPaths(node[key], newPath);
                 }).join('');
@@ -100,26 +100,29 @@
             .then(data => {
                 const clientListElement = document.getElementById('clientList');
                 clientListElement.innerHTML = '';
-                data.forEach(client => {
+                for (i=0; i < data.length; i++) {
+                    let client = data[i]
                     const div = document.createElement('div');
                     div.innerHTML = `<strong>${client.username}</strong>
                         <button onclick="kickClient('${client.clientId}')">Kick</button>
                         <button onclick="banClient('${client.ip}')">Ban</button>
                         <button onclick="globalBanClient('${client.ip}')">GL Ban</button>`;
                     clientListElement.appendChild(div);
-                });
+                }
             });
         }
 
         async function fetchMessages() {
-            await fetch(`/chat-logs/${selectedPath}`, {method: 'GET'})
-                .then(response => response.json())
-                .then(messages => {
-                    const messagesContainer = document.getElementById('messages');
-                    messagesContainer.innerHTML = '';
+            await fetch(`/chat-logs/${selectedPath}`, { method: 'GET' }) // Should be GET, not POST
+                .then(res => res.json()) // ✅ Return res.json()
+                .then(data => {
+                    document.getElementById("messages").innerHTML = "";
                     timestamp = ""
-                    messages.forEach(msg => {displayMessage(msg)});
-                });
+                    for (i=0; i < data.length; i++) {
+                        displayMessage(data[i])
+                    }
+                })
+                .catch(error => console.error("Error fetching messages:", error));
         }
 
         function displayMessage(data) {
@@ -197,9 +200,9 @@
             }
         }, 5000);
         loadPaths();
-            if (pathSelect.options.length > 0) {
-                fetchRoomData()
-            }
+        if (pathSelect.options.length > 0) {
+            fetchRoomData()
+        }
     </script>
 
 </body>
