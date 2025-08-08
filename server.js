@@ -8,7 +8,6 @@ const WebSocket = require('ws');
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-
 const CHAT_LOG_FILE = "SC-history.json";
 const paths = {}; // Store nested paths of categories and rooms
 const connectedUsers = {}
@@ -32,7 +31,7 @@ app.use((req, res, next) => {
 
 // Restrict path management to admin (server IP)
 function isAdmin(req) {
-    return req.socket.remoteAddress.includes(hostIP);
+    return req.socket.remoteAddress+req.socket.localAddress === "::1::1"
 }
 
 app.get('/', (req, res) => {
@@ -64,7 +63,9 @@ wss.on('connection', (ws, req) => {
     ws.on("close", () => {
         let room = getRoom(connectedUsers[clientId].roomPath)
         console.log("connection to client id: '"+clientId+"' closed")
-        room.clients.delete(clientId);
+        if (Object.keys(room.clients).includes(clientId)) {
+            delete room.clients[clientId]
+        };
         delete connectedUsers[clientId];
     });
 
@@ -86,21 +87,19 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
-
-            
             if (room.bannedIPs.includes(req.socket.remoteAddress) || glBannedIPs.includes(req.socket.remoteAddress)) {
                 ws.close();
                 return;
             }
-
-            console.log(data)
             
             if (data.type === "join") {
                 console.log(`New client in path: ${path}, ID: ${clientId}`);
-                room.clients.set(clientId, { ws, username: username });
+                room.clients[clientId] = { ws, username: username };
                 connectedUsers[clientId] = { ws, username: username, roomPath: path}
-                // Send chat history to the new client
+                // Send chat history and characterLimit to the new client
                 ws.send(JSON.stringify({ type: "message", data: {history: getMessages(path)} }));
+                console.log({value: room.settings.characterLimit})
+                ws.send(JSON.stringify({ type: "characterLimit", data: {value: room.settings.characterLimit}}));
             }
             
             let date = new Date()
@@ -124,6 +123,11 @@ wss.on('connection', (ws, req) => {
                 };
                 room.messages.push(fileData);
                 broadcast("message", path, { history: getMessages(path) });
+            } else if (data.type === "delete") {
+                if (data.index >= 0 && data.index < room.messages.length && room.messages[data.index].username === room.clients[clientId].username) {
+                    room.messages.splice(data.index, 1)
+                    broadcast("clear", path, { history: getMessages(path) });
+                }
             }
         } catch (error) {
             console.error('Error parsing message:', error);
@@ -141,7 +145,7 @@ function getRoom(path) {
         // If the part does not exist, create an empty object
         if (!node[part]) {
             node[part] = (i === parts.length - 1) 
-                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false }, bannedIPs: []}}
+                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false, characterLimit: 100 }, bannedIPs: []}}
                 : {}; // Intermediate objects
         }
 
@@ -161,7 +165,7 @@ function createRoom(path) {
         // If the part does not exist, create an empty object
         if (!node[part]) {
             node[part] = (i === parts.length - 1) 
-                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false }, bannedIPs: []}}
+                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false, characterLimit: 100 }, bannedIPs: []}}
                 : {}; // Intermediate objects
         }
 
@@ -182,7 +186,7 @@ function getMessages(path) {
 function broadcast(type, path, data) {
     let room = getRoom(path);
     console.log({type, data})
-    room?.clients.forEach(({ ws }) => {
+    Object.values(room?.clients).forEach(({ ws }) => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({type, data}));
         }
@@ -210,17 +214,24 @@ app.post('/add-room', (req, res) => {
 app.get('/clients/:path', (req, res) => {
     const path = req.params.path;
     let room = getRoom(path);
-    if (!room || !room.clients || room.clients.size === 0) {
-        res.json({})
+    if (!room || !room.clients) {
+        res.json([])
     } else {
-        let data = Array.from(room.clients.entries()).map(([clientId, value]) => ({
-            clientId: clientId,
-            ws: value.ws,
-            username: value.username
-        }));
-
-        console.log(data)
-        res.json(Array.from(data));
+        if (isAdmin(req)) {
+            let data = Array.from(Object.entries(room.clients)).map(([clientId, value]) => ({
+                clientId: clientId,
+                ws: value.ws,
+                username: value.username
+            }));
+            res.json(Array.from(data));
+        } else {
+            let data = Array.from(Object.entries(room.clients)).map(([clientId, value]) => ({
+                clientId: clientId,
+                ws: null,
+                username: value.username
+            }));
+            res.json(Array.from(data));
+        }
     }
 });
 
@@ -295,13 +306,12 @@ app.post('/save-chat', (req, res) => {
 
 // Delete a specific message from a room
 app.post('/delete-message/:path', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     const { index } = req.body;
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     if (index >= 0 && index < room.messages.length) {
         room.messages.splice(index, 1)
-        console.log(room.messages)
         broadcast("clear", path, { history: getMessages(path) });
         res.json({ success: true, message: 'Message deleted' });
     } else {
@@ -317,6 +327,16 @@ app.post('/anonymous/:path', (req, res) => {
     room.settings.anonymous = req.body.anonymous === true;
     broadcast("anonymous", path, { history: getMessages(path) });
     res.json({ success: true, message: `Anonymous mode is ${room.settings.anonymous}` });
+});
+
+// Toggle anonymous mode
+app.post('/characterLimit/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    const path = req.params.path;
+    let room = getRoom(path);
+    room.settings.characterLimit = req.body.characterLimit;
+    broadcast("characterLimit", path, { value: characterLimit });
+    res.json({ success: true, message: `characterLimit mode is ${room.settings.characterLimit}` });
 });
 
 // Kick a user from a room

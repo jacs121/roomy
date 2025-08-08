@@ -3,26 +3,205 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Socket Chat - Control Panel</title>
+    <title>Roomy - Control Panel</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
         #clientList, #messages { border: 1px solid #ccc; padding: 10px; margin-top: 10px; max-width: 600px; margin-left: auto; margin-right: auto; }
         .message { display: flex; justify-content: space-between; }
-        .delete-btn { background-color: red; color: white; border: none; padding: 5px; cursor: pointer; }
+        /* Common Styles */
+        :root {
+        --primary: #4361ee;
+        --secondary: #3f37c9;
+        --accent: #4895ef;
+        --light: #f8f9fa;
+        --dark: #212529;
+        --success: #4cc9f0;
+        --danger: #f7255a;
+        --danger-hover: #f00c32;
+        --warning: #f8961e;
+        --gray: #6c757d;
+        --light-gray: #e9ecef;
+        --border: #dee2e6;
+        --card-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        --transition: all 0.3s ease;
+        }
+
+        * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        }
+
+        body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f5f7fb;
+        color: var(--dark);
+        line-height: 1.6;
+        padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+        }
+
+        h1, h2, h3 {
+        color: var(--secondary);
+        margin-bottom: 1rem;
+        }
+
+        button, input, select {
+        font-family: inherit;
+        font-size: 1rem;
+        }
+
+        button {
+        cursor: pointer;
+        transition: var(--transition);
+        }
+
+        /* Card Styling */
+        .card {
+        background: white;
+        border-radius: 10px;
+        box-shadow: var(--card-shadow);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        }
+
+        /* Form Elements */
+        input[type="text"],
+        input[type="file"],
+        select {
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        width: 100%;
+        transition: var(--transition);
+        }
+
+        input:focus, select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+        }
+
+        button {
+        background-color: var(--primary);
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        font-weight: 600;
+        }
+
+        button:hover {
+        background-color: var(--secondary);
+        transform: translateY(-2px);
+        }
+
+        button:disabled {
+        background-color: var(--light-gray);
+        cursor: not-allowed;
+        transform: none;
+        }
+
+        /* ===================== */
+        /* CONTROL PANEL SPECIFIC */
+        /* ===================== */
+        #controls {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        }
+
+        #room-controls {
+        display: flex;
+        gap: 10px;
+        }
+
+        #clientList, #messages {
+        background: white;
+        border-radius: 10px;
+        padding: 1.25rem;
+        margin-top: 1rem;
+        box-shadow: var(--card-shadow);
+        }
+
+        .client-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--light-gray);
+        }
+
+        .client-info {
+        font-weight: 600;
+        }
+
+        .client-actions {
+        display: flex;
+        gap: 0.5rem;
+        }
+
+        .client-actions button {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+        }
+
+        .delete-btn {
+            border: none;
+            padding: 5px;
+            background-color: var(--danger);
+        }
+        .delete-btn:hover {
+            background-color: var(--danger-hover);
+        }
+
+        .message-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--light-gray);
+        }
+
+        .message-content {
+        flex: 1;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+        #controls {
+            grid-template-columns: 1fr;
+        }
+        
+        #header {
+            flex-direction: column;
+        }
+        
+        #input-area {
+            flex-direction: column;
+        }
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
 
     <h1>Control Panel</h1>
-    <input type="text" id="newPath" placeholder="New path (e.g. Main/Sub1)">
-    <button onclick="addRoom()">Add Room</button>
-    <select id="pathSelect" onchange="fetchRoomData()"></select>
-
+    <input class="controls" type="text" id="newPath" placeholder="New path (e.g. Main/Sub1)">
+    <button class="controls" onclick="addRoom()">Add Room</button>
+    <select class="controls" id="pathSelect" onchange="fetchRoomData()"></select>
+    
     <button onclick="clearMessages()" id="clearMessages" disabled>Clear Messages</button>
     <button onclick="saveChat()" id="saveChat" disabled>Save Chat</button>
     <button onclick="updateClients()" id="updateClients" disabled>Update Clients</button>
+    <br>
+    <br>
+    <input type="number" id="characterLimit" placeholder="character limit" disabled>
     <input type="checkbox" id="anonymous" disabled>anonymous
+    <button onclick="updateSettings()" id="updateSettings" disabled>Update Settings</button>
 
     <h2>Connected Clients</h2>
     <div id="clientList"></div>
@@ -31,7 +210,7 @@
     <div id="messages"></div>
 
     <script async="true">
-        let selectedPath = ""
+        let selectedPath = "room1"
         let timestamp = ""
         marked.use({
             pedantic: false,
@@ -43,7 +222,6 @@
             let res = await fetch('/paths', {method: 'GET'});
             let paths = await res.json();
             let pathSelect = document.getElementById('pathSelect');
-    
             function renderPaths(node, prefix = "") {
                 return Object.keys(node).map(key => {
                     if (key === "_room_") return "";
@@ -51,16 +229,22 @@
                     return `<option value="${newPath}">${newPath}</option>` + renderPaths(node[key], newPath);
                 }).join('');
             }
-    
+            
             pathSelect.innerHTML = renderPaths(paths);
+            pathSelect.value = selectedPath
+            if (pathSelect.value === "") return
             if (pathSelect.options.length > 0) {
                 document.getElementById("anonymous").disabled = false
+                document.getElementById("characterLimit").disabled = false
+                document.getElementById("updateSettings").disabled = false
                 document.getElementById("clearMessages").disabled = false
                 document.getElementById("saveChat").disabled = false
                 document.getElementById("updateClients").disabled = false
                 fetchRoomData()
             } else {
                 document.getElementById("anonymous").disabled = true
+                document.getElementById("characterLimit").disabled = true
+                document.getElementById("updateSettings").disabled = true
                 document.getElementById("clearMessages").disabled = true
                 document.getElementById("saveChat").disabled = true
                 document.getElementById("updateClients").disabled = true
@@ -69,6 +253,7 @@
 
         async function fetchRoomData() {
             selectedPath = document.getElementById("pathSelect").value;
+            if (selectedPath == "") return
             await updateClients();
             await fetchMessages();
         }
@@ -86,21 +271,37 @@
 
 
         document.getElementById("anonymous").addEventListener("change", async (event) => {
+            
+        });
+
+        function updateSettings() {
+            let anonymousSetting = document.getElementById("anonymous").checked
+            let characterLimitSetting = document.getElementById("characterLimit").value
             fetch(`/anonymous/${selectedPath}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ anonymous: event.target.checked })
+                body: JSON.stringify({ anonymous: anonymousSetting })
             });
-        });
+
+            if (characterLimitSetting) {
+                fetch(`/characterLimit/${selectedPath}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ characterLimit: characterLimitSetting })
+                });
+            }
+        }
 
 
         async function updateClients() {
+            console.log(`/clients/${selectedPath}`)
             await fetch(`/clients/${selectedPath}`, {method: 'GET'})
             .then(async response => {
                 let res = await response.json()
                 return res
             })
             .then(data => {
+                console.log(data)
                 const clientListElement = document.getElementById('clientList');
                 clientListElement.innerHTML = '';
                 for (i=0; i < data.length; i++) {
@@ -110,7 +311,7 @@
                     div.innerHTML = `<strong>${client.username}</strong>
                         <button onclick="kickClient('${client.clientId}')">Kick</button>
                         <button onclick="banClient('${client.ip}')">Ban</button>
-                        <button onclick="globalBanClient('${client.ip}')">GL Ban</button>`;
+                        <button onclick="globalBanClient('${client.ip}')">Global Ban</button>`;
                     clientListElement.appendChild(div);
                 }
             });
@@ -156,7 +357,7 @@
                 messageHTML += `${marked.parse(data.text)}`;
                 messageHTML = messageHTML.slice(0, messageHTML.length-5)
             }
-            div.innerHTML += messageHTML+"\t"+`<button class="delete-btn" onclick="deleteMessage(${index})">X</button>`;
+            div.innerHTML += messageHTML+`\t<button class="delete-btn" onclick="deleteMessage(${index})">X</button>`;
 
             messages.innerHTML += div.innerHTML;
             messages.scrollTop = messages.scrollHeight;
@@ -215,10 +416,10 @@
         setInterval(async () => {
             await loadPaths();
             if (pathSelect.options.length > 0) {
-                fetchRoomData()
+                await fetchRoomData()
             }
         }, 5000);
-        loadPaths();
+        loadPaths()
         if (pathSelect.options.length > 0) {
             fetchRoomData()
         }
