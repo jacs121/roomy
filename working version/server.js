@@ -31,6 +31,7 @@ app.use((req, res, next) => {
 
 // Restrict path management to admin (server IP)
 function isAdmin(req) {
+    console.log("admin request from:", req.socket.remoteAddress, req.socket.localAddress)
     return req.socket.remoteAddress+req.socket.localAddress === "::1::1"
 }
 
