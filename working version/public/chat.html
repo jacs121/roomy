@@ -3,11 +3,223 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Socket Chat</title>
+    <title>Roomy</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
         #messages { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; margin-bottom: 10px; }
         input, button { margin-top: 10px; }
+        
+        /* Common Styles */
+        :root {
+        --primary: #4361ee;
+        --secondary: #3f37c9;
+        --accent: #4895ef;
+        --light: #f8f9fa;
+        --dark: #212529;
+        --success: #4cc9f0;
+        --danger: #f72585;
+        --warning: #f8961e;
+        --gray: #6c757d;
+        --light-gray: #e9ecef;
+        --border: #dee2e6;
+        --card-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        --transition: all 0.3s ease;
+        }
+
+        * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        }
+
+        body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f5f7fb;
+        color: var(--dark);
+        line-height: 1.6;
+        padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+        }
+
+        h1, h2, h3 {
+        color: var(--secondary);
+        margin-bottom: 1rem;
+        }
+
+        button, input, select {
+        font-family: inherit;
+        font-size: 1rem;
+        }
+
+        button {
+        cursor: pointer;
+        transition: var(--transition);
+        }
+
+        /* Card Styling */
+        .card {
+        background: white;
+        border-radius: 10px;
+        box-shadow: var(--card-shadow);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        }
+
+        /* Form Elements */
+        input[type="text"],
+        input[type="file"],
+        select {
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        width: 100%;
+        transition: var(--transition);
+        }
+
+        input:focus, select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+        }
+
+        button {
+        background-color: var(--primary);
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        font-weight: 600;
+        }
+
+        button:hover {
+        background-color: var(--secondary);
+        transform: translateY(-2px);
+        }
+
+        button:disabled {
+        background-color: var(--light-gray);
+        cursor: not-allowed;
+        transform: none;
+        }
+
+        /* ===================== */
+        /* CHAT PAGE SPECIFIC */
+        /* ===================== */
+        #chat-container {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 100px);
+        max-width: 800px;
+        margin: 0 auto;
+        }
+
+        .delete-btn {
+            border: none;
+            padding: 5px;
+            background-color: var(--danger);
+        }
+        .delete-btn:hover {
+            background-color: var(--danger-hover);
+        }
+
+        #header {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        }
+
+        #header > * {
+        flex: 1 1 200px;
+        }
+
+        #messages {
+        flex: 1;
+        background: white;
+        border-radius: 10px;
+        padding: 1.25rem;
+        overflow-y: auto;
+        margin-bottom: 1rem;
+        box-shadow: var(--card-shadow);
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        }
+
+        .message-row {
+        display: flex;
+        flex-direction: column;
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--light-gray);
+        }
+
+        .message-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.25rem;
+        }
+
+        .username {
+        font-weight: 600;
+        color: var(--secondary);
+        }
+
+        .timestamp {
+        font-size: 0.75rem;
+        color: var(--gray);
+        }
+
+        .message-content {
+        word-wrap: break-word;
+        }
+
+        .message-content img {
+        max-width: 100%;
+        border-radius: 8px;
+        margin-top: 0.5rem;
+        }
+
+        #input-area {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        background: white;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: var(--card-shadow);
+        }
+
+        #input-container {
+        flex: 1;
+        display: flex;
+        gap: 10px;
+        }
+
+        #messageInput {
+        flex: 1;
+        }
+
+        #emojiPicker {
+        position: absolute;
+        bottom: 70px;
+        right: 20px;
+        z-index: 100;
+        }
+
+        #dropZone {
+        padding: 1rem;
+        border: 2px dashed var(--border);
+        border-radius: 8px;
+        text-align: center;
+        cursor: pointer;
+        transition: var(--transition);
+        }
+
+        #dropZone:hover {
+        border-color: var(--accent);
+        background-color: rgba(72, 149, 239, 0.05);
+        }
     </style>
 </head>
 <body>
@@ -17,6 +229,7 @@
 
     
     <h2>Socket Chat</h2>
+    <select id="pathSelect" onchange="updateRooms(this.options[this.selectedIndex].value)"></select>
     <input type="text" id="username" placeholder="Enter your name">
     <button id="joinButton" onclick="joinChat()">Join</button>
     
@@ -31,7 +244,7 @@
     <button id="sendButton" onclick="sendMessage()" disabled>Send</button>
     
 
-    <script>
+    <script async>
         marked.use({
             pedantic: false,
             gfm: true,
@@ -40,16 +253,37 @@
         let ws;
         let timestamp = ""
         let username = "";
+        let selectedPath = ""
+        let characterLimit = 0
         
-        const isValidUrl = urlString=> {
-            var urlPattern = new RegExp('^(https?:\\/\\/)?'+ // validate protocol
-          '((([a-z\\d]([a-z\\d-]*[a-z\\d])*)\\.)+[a-z]{2,}|'+ // validate domain name
-          '((\\d{1,3}\\.){3}\\d{1,3}))'+ // validate OR ip (v4) address
-          '(\\:\\d+)?(\\/[-a-z\\d%_.~+]*)*'+ // validate port and path
-          '(\\?[;&a-z\\d%_.~+=-]*)?'+ // validate query string
-          '(\\#[-a-z\\d_]*)?$','i'); // validate fragment locator
-        return !!urlPattern.test(urlString);
+        async function loadPaths() {
+            let res = await fetch('/paths', {method: 'GET'});
+            let paths = await res.json();
+            console.log(paths)
+            let pathSelect = document.getElementById('pathSelect');
+    
+            function renderPaths(node, prefix = "") {
+                return Object.keys(node).map(key => {
+                    if (key === "_room_") return "";
+                    let newPath = prefix ? `${prefix}/${key}` : key;
+                    return `<option value="${newPath}">${newPath}</option>` + renderPaths(node[key], newPath);
+                }).join('');
+            }
+    
+            pathSelect.innerHTML = renderPaths(paths);
+            if (pathSelect.options.length > 0) {
+                updateRooms(pathSelect.options[pathSelect.selectedIndex].value)
+            }
         }
+
+        function updateRooms(choice) {
+            let pathSelect = document.getElementById('pathSelect');
+            selectedPath = choice
+        }
+
+        document.getElementById("messageInput").addEventListener("change", (event) => {
+            
+        })
 
         document.addEventListener("DOMContentLoaded", () => {
             const emojiPicker = document.getElementById("emojiPicker");
@@ -96,12 +330,23 @@
         }
 
 
-        function joinChat() {
+        async function joinChat() {
             const input = document.getElementById("username");
             username = input.value.trim();
+            let usernames = []
+            await fetch(`/clients/${selectedPath}`, {method: 'GET'})
+            .then(response => response.json())
+            .then(data => {
+                data.forEach((client) => usernames.push(client.username))
+            })
 
-            if (!username) {
-                alert("Please enter a valid username.");
+            if (!selectedPath || !username) {
+                alert("Please enter a room name and a username.");
+                return;
+            }
+
+            if (usernames.includes(username)) {
+                alert("username already taken.");
                 return;
             }
 
@@ -114,35 +359,53 @@
             document.getElementById("addEmoji").disabled = false;
             document.getElementById("dropZone").disabled = false;
 
-            ws = new WebSocket(window.location.href.replace("http", "ws"));
+            ws = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host);
 
             ws.onopen = () => {
-                addMessage(`Connected as ${username}`);
-                ws.send(JSON.stringify({ username }));
+                addMessage(`Connected as ${username} in room ${selectedPath}`);
+                setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: "ping" }));
+                    }
+                }, 30000);
+
+                ws.send(JSON.stringify({
+                    type: "join",
+                    path: selectedPath, 
+                    username
+                }));
             };
+
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
 
-                if (data.clearMessages || data.history) {
-                    document.getElementById("messages").innerHTML = "";
-                    if (data.clearMessages) return;
+                if (data.type === "paths") {
+                    loadPaths(data.paths)
+                    return
                 }
 
-                console.log(data)
+                if (data.type === "characterLimit") {
+                    characterLimit = data.data.value
+                    console.log(data)
+                    return
+                }
 
-                if (data.history) {
-                    let timestamp = ""
-                    data.history.forEach(msg => displayMessage(msg));
+                document.getElementById("messages").innerHTML = "";
+                
+                timestamp = ""
+                let history = []
+                if (data.data.clearMessages) {
+                    history = []
                 } else {
-                    displayMessage(data);
-
-                }setInterval(() => {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ ping: "" }));
-                    }
-                }, 30000)
-
+                    history = data.data.history
+                }
+                let index = 0
+                history.forEach(msg => {
+                    displayMessage(msg, index)
+                    index ++
+                })
+                
             };
 
             ws.onclose = () => addMessage("WebSocket connection closed.");
@@ -159,7 +422,8 @@
 
             if (msg) {
                 document.getElementById("emojiPicker").style.display = "none";
-                ws.send(JSON.stringify({ username, text: msg.replace("\\n", "<br>") }));
+                if (msg.length > characterLimit) msg = msg.substring(0, characterLimit)
+                ws.send(JSON.stringify({type: "message", path: selectedPath, username, text: msg}));
                 document.getElementById("messageInput").value = "";
             }
             if (fileInput.files.length > 0) {
@@ -168,6 +432,8 @@
                     const reader = new FileReader();
                     reader.onload = (event) => {
                         ws.send(JSON.stringify({
+                            type: "file",
+                            path: selectedPath, 
                             username,
                             filename: file.name,
                             fileType: file.type,
@@ -180,7 +446,7 @@
             }
         }
 
-        function displayMessage(data) {
+        function displayMessage(data, index) {
             const messages = document.getElementById("messages");
             let messageHTML = `<p><strong>[${data.username}] </strong> `;
             if (data.timestamp !== timestamp) {
@@ -199,7 +465,11 @@
                     messageHTML += `<br><a href="${data.result}" download="${data.filename}">${data.filename}</a>`;
                 }
             } else {
-                messageHTML += `${marked.parseInline(data.text)}`;
+                messageHTML += `${marked.parse(data.text.replace(/\n/g, "<br>") )}`;
+            }
+
+            if (data.username === username) {
+                messageHTML += `<button class="delete-btn" onclick="deleteMessage(${index})">X</button>`;
             }
 
             messageHTML += `</p>`;
@@ -207,11 +477,16 @@
             messages.scrollTop = messages.scrollHeight;
         }
 
+        function deleteMessage(index) {
+            ws.send(JSON.stringify({type: "delete", path: selectedPath, index}));
+        }
+
         function addMessage(message) {
             const messages = document.getElementById("messages");
             messages.innerHTML += `<p>${message}</p>`;
             messages.scrollTop = messages.scrollHeight;
         }
+        loadPaths();
     </script>
 
 </body>

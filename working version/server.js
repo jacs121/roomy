@@ -8,8 +8,10 @@ const WebSocket = require('ws');
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-
 const CHAT_LOG_FILE = "SC-history.json";
+const paths = {}; // Store nested paths of categories and rooms
+const connectedUsers = {}
+const glBannedIPs = []
 
 // Get host IP address
 const hostIP = Object.values(os.networkInterfaces())
@@ -17,209 +19,350 @@ const hostIP = Object.values(os.networkInterfaces())
     .filter(iface => iface.family === 'IPv4' && !iface.internal)
     .map(iface => iface.address)[0] || '127.0.0.1';
 
-// Store clients and chat history
-const clients = new Map();
-let messageHistory = [];
-let settings = {anonymous: false}
-let bannedIPs = [];
-
-// Load previous chat history
-if (fs.existsSync(CHAT_LOG_FILE)) {
-    try {
-        let chat = JSON.parse(fs.readFileSync(CHAT_LOG_FILE, "utf8"));
-        messageHistory = chat.messageHistory
-        settings = chat.settings
-        bannedIPs = bannedIPs
-    } catch (err) {
-        console.error("Error loading chat history:", err);
-    }
-}
+app.use(express.json());
 
 app.use((req, res, next) => {
-    // Disallow direct access to any HTML file
     if (req.path.endsWith('.html')) {
-        res.status(404).send(req.path+' Not Found');
+        res.status(404).send(req.path + ' Not Found');
     } else {
         next();
     }
 });
 
-// Allow index.html only at root `/`
+// Restrict path management to admin (server IP)
+function isAdmin(req) {
+    return req.socket.remoteAddress+req.socket.localAddress === "::1::1"
+}
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'chat.html'));
 });
 
-// Allow manage.html at root `/manage` only for the server's pc
 app.get('/control-panel', (req, res) => {
-    if (req.ip.includes("::ffff:") ? req.ip.split("::ffff:")[1] : req.ip)
-        res.sendFile(path.join(__dirname, 'public', 'control panel.html'));
-    else {
-        res.status(403).send("Forbidden: Access restricted to none local addresses.")
-    }
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    res.sendFile(path.join(__dirname, 'public', 'control-panel.html'));
 });
 
-// **Handle WebSocket Connections**
-wss.on('connection', (ws, req) => {
-    const clientIp = req.socket.remoteAddress;
-    if (bannedIPs.includes(clientIp)) {
-        ws.close();
-        return;
+// Load previous chat history
+if (fs.existsSync(CHAT_LOG_FILE)) {
+    try {
+        let chatData = JSON.parse(fs.readFileSync(CHAT_LOG_FILE, "utf8"));
+        Object.assign(paths, chatData.paths);
+        Object.assign(glBannedIPs, chatData.glBannedIPs);
+    } catch (err) {
+        console.error("Error loading chat history:", err);
     }
+}
 
+
+// Handle WebSocket connections
+wss.on('connection', (ws, req) => {
     const clientId = Math.random().toString(36).substring(7);
-    clients.set(clientId, { ws, ip: clientIp, username: "Unknown" });
+    connectedUsers[clientId] = { ws, username: "Unknown", roomPath: "", ip: req.socket.remoteAddress};
 
-    console.log(`New client connected! ID: ${clientId}, IP: ${clientIp}`);
-
-    // Send chat history to new clients
-    ws.send(JSON.stringify({ history: getAnonymizedMessages() }));
-
-
-    ws.isAlive = true;
+    ws.on("close", () => {
+        let room = getRoom(connectedUsers[clientId].roomPath)
+        console.log("connection to client id: '"+clientId+"' closed")
+        if (Object.keys(room.clients).includes(clientId)) {
+            delete room.clients[clientId]
+        };
+        delete connectedUsers[clientId];
+    });
 
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            if (data.ping) {
+            
+            if (data.type === "ping") {
                 ws.isAlive = true;
                 return
             }
 
-            if (data.username) {
-                clients.get(clientId).username = data.username;
+            const {path, username } = data;
+            let room = getRoom(path);
+
+            if (!room) {
+                console.log("room not found")
+                ws.close();
+                return;
             }
+
+            if (room.bannedIPs.includes(req.socket.remoteAddress) || glBannedIPs.includes(req.socket.remoteAddress)) {
+                ws.close();
+                return;
+            }
+            
+            if (data.type === "join") {
+                console.log(`New client in path: ${path}, ID: ${clientId}`);
+                room.clients[clientId] = { ws, username: username };
+                connectedUsers[clientId] = { ws, username: username, roomPath: path}
+                // Send chat history and characterLimit to the new client
+                ws.send(JSON.stringify({ type: "message", data: {history: getMessages(path)} }));
+                console.log({value: room.settings.characterLimit})
+                ws.send(JSON.stringify({ type: "characterLimit", data: {value: room.settings.characterLimit}}));
+            }
+            
             let date = new Date()
-
-            if (data.text) {
-                let msgData = { 
-                    username: data.username, 
-                    text: data.text, 
+            if (data.type === "message") {
+                const msgData = {
+                    username: room.settings.anonymous ? "ANONYMOUS" : username,
+                    text: data.text,
                     type: "text",
-                    timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
+                    timestamp: `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
                 };
-                messageHistory.push(msgData);
-                if (settings.anonymous) {
-                    msgData.username = "ANONYMOUS"
-                }
-
-
-                broadcast({history: getAnonymizedMessages()});
-            } else if (data.filename && data.result) {
-                let fileData = {
-                    username: data.username,
+                room.messages.push(msgData);
+                broadcast("message", path, { history: getMessages(path) });
+            } else if (data.type === "file") {
+                const fileData = {
+                    username: username,
                     filename: data.filename,
                     fileType: data.fileType,
-                    result: data.result,  
+                    result: data.result,
                     type: "file",
-                    timestamp: `${date.getFullYear()}.${date.getMonth()}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
+                    timestamp: `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
                 };
-                messageHistory.push(fileData);
-                broadcast({history: getAnonymizedMessages()});
+                room.messages.push(fileData);
+                broadcast("message", path, { history: getMessages(path) });
+            } else if (data.type === "delete") {
+                if (data.index >= 0 && data.index < room.messages.length && room.messages[data.index].username === room.clients[clientId].username) {
+                    room.messages.splice(data.index, 1)
+                    broadcast("clear", path, { history: getMessages(path) });
+                }
             }
         } catch (error) {
             console.error('Error parsing message:', error);
         }
     });
-
-    ws.on('close', () => {
-        console.log(`Client disconnected: ${clientId}`);
-        clients.delete(clientId);
-    });
 });
 
-function getAnonymizedMessages() {
-    return messageHistory.map(msg => ({
+function getRoom(path) {
+    let parts = path.split("/");
+    let node = paths;
+
+    for (let i = 0; i < parts.length; i++) {
+        let part = parts[i];
+
+        // If the part does not exist, create an empty object
+        if (!node[part]) {
+            node[part] = (i === parts.length - 1) 
+                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false, characterLimit: 100 }, bannedIPs: []}}
+                : {}; // Intermediate objects
+        }
+
+        node = node[part]; // Move deeper into the object
+    }
+
+    return node["_room_"]
+}
+
+function createRoom(path) {
+    let parts = path.split("/");
+    let node = paths;
+
+    for (let i = 0; i < parts.length; i++) {
+        let part = parts[i];
+
+        // If the part does not exist, create an empty object
+        if (!node[part]) {
+            node[part] = (i === parts.length - 1) 
+                ? {_room_: { clients: new Map(), messages: [], settings: { anonymous: false, characterLimit: 100 }, bannedIPs: []}}
+                : {}; // Intermediate objects
+        }
+
+        node = node[part]; // Move deeper into the object
+    }
+}
+
+
+
+function getMessages(path) {
+    let room = getRoom(path);
+    return room ? room.messages.map(msg => ({
         ...msg,
-        username: settings.anonymous ? "ANONYMOUS" : msg.username
-    }));
+        username: room.settings.anonymous ? "ANONYMOUS" : msg.username
+    })) : [];
 }
 
-// **Broadcast to All Clients**
-function broadcast(data) {
-    clients.forEach(({ ws }) => {
+function broadcast(type, path, data) {
+    let room = getRoom(path);
+    console.log({type, data})
+    Object.values(room?.clients).forEach(({ ws }) => {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(data));
+            ws.send(JSON.stringify({type, data}));
         }
     });
 }
 
-// **API to Get Connected Clients**
-app.get('/clients', (req, res) => {
-    res.json(Array.from(clients, ([clientId, { ip, username }]) => ({ clientId, ip, username })));
+// Get the structure of paths
+app.get('/paths', (req, res) => {
+    res.json(paths);
 });
 
-app.post('/ban-client', (req, res) => {
-    const { ip } = req.body;
-    if (!ip) return res.status(400).json({ success: false, message: 'No IP provided' });
+// Add a new chat room (Admin Only)
+app.post('/add-room', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+    const { path } = req.body;
+    createRoom(path);
+
+    res.json({ success: true, message: `Room ${path} added.` });
+    broadcastAll("paths", paths)
+});
+
+
+// Get connected clients in a room
+app.get('/clients/:path', (req, res) => {
+    const path = req.params.path;
+    let room = getRoom(path);
+    if (!room || !room.clients) {
+        res.json([])
+    } else {
+        if (isAdmin(req)) {
+            let data = Array.from(Object.entries(room.clients)).map(([clientId, value]) => ({
+                clientId: clientId,
+                ws: value.ws,
+                username: value.username
+            }));
+            res.json(Array.from(data));
+        } else {
+            let data = Array.from(Object.entries(room.clients)).map(([clientId, value]) => ({
+                clientId: clientId,
+                ws: null,
+                username: value.username
+            }));
+            res.json(Array.from(data));
+        }
+    }
+});
+
+app.get('/chat-logs/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     
-    bannedIPs.push(ip);
-    clients.forEach(({ ws, ip: clientIP }, clientId) => {
-        if (clientIP === ip) {
-            ws.close();
-            clients.delete(clientId);
+    const path = req.params.path;
+    let room = getRoom(path);
+    if (!room || !room.messages || room.messages.length === 0) res.json([])
+    else res.json(Array.from(room.messages)); // ✅ No need for JSON.stringify
+});
+
+
+// Clear all messages in a room
+app.post('/clear-messages/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    const path = req.params.path;
+    let room = getRoom(path);
+    if (room) {
+        room.messages = [];
+        broadcast("clear", path, { clearMessages: true });
+        res.json({ success: true, message: `Messages cleared for room ${path}` });
+    } else {
+        res.status(400).json({ success: false, message: 'Room not found' });
+    }
+});
+
+// Ban a user from a room
+app.post('/ban-client/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    const path = req.params.path;
+    let room = getRoom(path);
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ success: false, message: 'Invalid IP' });
+
+    room.BannedIPs.push(ip);
+    connectedUsers.forEach((client, clientId) => {
+        if (client.ip === ip) {
+            client.ws.close();
         }
     });
 
-    res.json({ success: true, message: `IP ${ip} has been banned.` });
+    res.json({ success: true, message: `IP ${ip} has been banned from room ${path}` });
 });
 
+// Ban a user from a room
+app.post('/gl-ban-client/', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ success: false, message: 'Invalid IP' });
 
-// **API to Get Chat Logs**
-app.get('/chat-log', (req, res) => {
-    res.json(messageHistory);
+    glBannedIPs.push(ip);
+    connectedUsers.forEach((client, clientId) => {
+        if (client.ip === ip) {
+            client.ws.close();
+        }
+    });
+
+    res.json({ success: true, message: `IP ${ip} has been banned from the server` });
 });
 
-// **API to Save Chat History**
+// Save chat history
 app.post('/save-chat', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
     try {
-        fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify({messageHistory, bannedIPs, settings}, null, 2));
+        fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify({paths: paths, glBannedIPs: glBannedIPs}, null, 2));
         res.json({ success: true, message: 'Chat saved!' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to save chat.' });
     }
 });
 
-// **API to Clear Messages**
-app.post('/clear-messages', (req, res) => {
-    messageHistory = [];
-    broadcast({ clearMessages: true });
-    res.json({ success: true, message: 'Messages cleared' });
-});
-
-
-// **API to turn on anonymous mode**
-app.post('/anonymous', (req, res) => {
-    settings.anonymous = req.body.anonymous === true; // Convert properly
-    broadcast({ history: getAnonymizedMessages() });
-    res.json({ success: true, message: `Anonymous mode is ${settings.anonymous}` });
-});
-
-// **API to Kick a Client**
-app.post('/kick-client', (req, res) => {
-    const { clientId } = req.body;
-    const client = clients.get(clientId);
-    if (client) {
-        client.ws.close();
-        clients.delete(clientId);
-        res.json({ success: true, message: `Client ${clientId} has been kicked.` });
-    } else {
-        res.status(404).json({ success: false, message: 'Client not found.' });
-    }
-});
-
-// **API to Delete a Message and Update Clients**
-app.post('/delete-message', (req, res) => {
+// Delete a specific message from a room
+app.post('/delete-message/:path', (req, res) => {
+    const path = req.params.path;
+    let room = getRoom(path);
     const { index } = req.body;
-    if (index >= 0 && index < messageHistory.length) {
-        messageHistory.splice(index, 1);
-        broadcast({history: getAnonymizedMessages()});
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (index >= 0 && index < room.messages.length) {
+        room.messages.splice(index, 1)
+        broadcast("clear", path, { history: getMessages(path) });
         res.json({ success: true, message: 'Message deleted' });
     } else {
         res.status(400).json({ success: false, message: 'Invalid message index' });
     }
 });
 
-// **Start the Server**
+// Toggle anonymous mode
+app.post('/anonymous/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    const path = req.params.path;
+    let room = getRoom(path);
+    room.settings.anonymous = req.body.anonymous === true;
+    broadcast("anonymous", path, { history: getMessages(path) });
+    res.json({ success: true, message: `Anonymous mode is ${room.settings.anonymous}` });
+});
+
+// Toggle anonymous mode
+app.post('/characterLimit/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    const path = req.params.path;
+    let room = getRoom(path);
+    room.settings.characterLimit = req.body.characterLimit;
+    broadcast("characterLimit", path, { value: characterLimit });
+    res.json({ success: true, message: `characterLimit mode is ${room.settings.characterLimit}` });
+});
+
+// Kick a user from a room
+app.post('/kick-client/:path', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    const path = req.params.path;
+    let room = getRoom(path);
+    const { clientId } = req.body;
+    if (room.clients.has(clientId)) {
+        room.clients.get(clientId).ws.close()
+        res.json({ success: true, message: `Client ${clientId} kicked.` });
+    } else {
+        res.status(404).json({ success: false, message: 'Client not found.' });
+    }
+});
+
+function broadcastAll(type, data) {
+    Object.values(connectedUsers).forEach(({ ws }) => {
+        console.log("sending...")
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type, data }));
+        }
+    });
+}
+
+
 server.listen(8080, () => {
     console.log(`Server running on http://${hostIP}:8080`);
 });
