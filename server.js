@@ -98,9 +98,9 @@ app.get("/auth/github/callback", async (req, res) => {
       return res.status(500).send("Authentication failed");
     }
 
+    req.session.githubUsername = user.login;
     if (adminList.includes(user.login)) {
       req.session.isAdmin = true;
-      req.session.githubUsername = user.login;
       
       // Properly save session before redirect
       req.session.save(err => {
@@ -113,9 +113,6 @@ app.get("/auth/github/callback", async (req, res) => {
         delete req.session.returnTo;
         res.redirect(redirectPath);
       });
-    } else {
-      console.warn(`Unauthorized access attempt by: ${user.login}`);
-      res.status(403).send("Forbidden: You are not an administrator");
     }
   } catch (error) {
     console.error("Authentication error:", error);
