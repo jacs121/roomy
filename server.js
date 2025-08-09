@@ -154,13 +154,6 @@ if (fs.existsSync(CHAT_LOG_FILE)) {
     }
 }
 
-app.get('/me', (req, res) => {
-    if (!session.githubUsername) {
-        return res.redirect("/login/github");
-    };
-    res.json({ username: req.session.githubUsername });
-});
-
 // Handle WebSocket connections
 wss.on('connection', (ws, req) => {
     const cookies = cookie.parse(req.headers.cookie || '');
@@ -187,10 +180,6 @@ wss.on('connection', (ws, req) => {
             }
 
             const { path } = data;
-            if (!session.githubUsername) {
-                req.session.returnTo = "/";
-                return res.redirect("/login/github");
-            };
             const sessionUsername = session.githubUsername || "Unknown";
             let room = getRoom(path);
 
