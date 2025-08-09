@@ -8,6 +8,7 @@ const fetch = require("node-fetch");
 const session = require("express-session");
 const dotenv = require("dotenv");
 const cookie = require('cookie');
+const cors = require('cors');
 
 dotenv.config({path: "process.env"});
 const app = express();
@@ -18,6 +19,10 @@ const paths = {}; // Store nested paths of categories and rooms
 const connectedUsers = {}
 const glBannedIPs = []
 const adminList = process.env.ADMIN_GITHUB_USERNAMES.split(",").map(u => u.trim());
+
+app.use(cors({
+    origin: 'https://roomy-26m6.onrender.com' // Replace with your actual frontend domain
+}));
 
 app.use(express.json());
 
