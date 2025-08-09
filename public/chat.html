@@ -436,12 +436,16 @@
                 fileInput.value = "";
             }
         }
-
+        
         function displayMessage(data, index) {
             const messages = document.getElementById("messages");
             let messageHTML = `<p><strong>[${data.username}] </strong> `;
             if (data.timestamp !== timestamp) {
                 messageHTML = `<span style="font-size:0.8em;color:gray;">(${data.timestamp})</span>` + messageHTML
+            }
+
+            if (data.username === username) {
+                messageHTML += `<button class="delete-btn" onclick="deleteMessage(${index})">X</button>`;
             }
             timestamp = data.timestamp
 
@@ -457,10 +461,6 @@
                 }
             } else {
                 messageHTML += `${marked.parse(data.text.replace(/\n/g, "<br>") )}`;
-            }
-
-            if (data.username === username) {
-                messageHTML += `<button class="delete-btn" onclick="deleteMessage(${index})">X</button>`;
             }
 
             messageHTML += `</p>`;
