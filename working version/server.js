@@ -124,7 +124,14 @@ app.get("/auth/github/callback", async (req, res) => {
 })
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'chat.html'));
+    if (!req.session.githubUsername) {
+        return res.redirect('/login/github');
+    }
+    
+    // Read and modify the HTML file
+    let html = fs.readFileSync(path.join(__dirname, 'public', 'chat.html'), 'utf8');
+    html = html.replace('<script>', `<script>const username = "${req.session.githubUsername}";`);
+    res.send(html);
 });
 
 app.get('/control-panel', (req, res) => {

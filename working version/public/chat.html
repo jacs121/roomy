@@ -252,20 +252,11 @@
           });
         let ws;
         let timestamp = ""
-        let username = null;
+        if (!username) {
+            const username = "unknown";
+        }
         let selectedPath = ""
         let characterLimit = 0
-
-        async function initUser() {
-            const response = await fetch('/me', {method: 'GET'});
-            if (response.ok) {
-                const data = await response.json();
-                username = data.username;
-                document.getElementById('username').innerText = `Logged in as: ${username}`;
-            } else {
-                window.location.href = '/login/github';
-            }
-        }
 
         
         async function loadPaths() {
@@ -365,7 +356,6 @@
             ws = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host);
 
             ws.onopen = async () => {
-                await initUser()
                 addMessage(`Connected as ${username} in room ${selectedPath}`);
                 setInterval(() => {
                     if (ws.readyState === WebSocket.OPEN) {
