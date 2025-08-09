@@ -130,7 +130,7 @@ app.get('/', (req, res) => {
     
     // Read and modify the HTML file
     let html = fs.readFileSync(path.join(__dirname, 'public', 'chat.html'), 'utf8');
-    html = html.replace('<script>', `<script>const username = "${req.session.githubUsername}";`);
+    html = html.replace('</script>', `</script>const username = "${req.session.githubUsername}";`);
     res.send(html);
 });
 
