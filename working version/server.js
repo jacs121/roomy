@@ -4,7 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const WebSocket = require('ws');
+const fetch = require("node-fetch");
+const session = require("express-session");
+const dotenv = require("dotenv");
 
+dotenv.config({path: "process.env"});
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -12,6 +16,7 @@ const CHAT_LOG_FILE = "SC-history.json";
 const paths = {}; // Store nested paths of categories and rooms
 const connectedUsers = {}
 const glBannedIPs = []
+const adminList = process.env.ADMIN_GITHUB_USERNAMES.split(",").map(u => u.trim());
 
 // Get host IP address
 const hostIP = Object.values(os.networkInterfaces())
@@ -29,18 +34,104 @@ app.use((req, res, next) => {
     }
 });
 
-// Restrict path management to admin (server IP)
-function isAdmin(req) {
-    console.log("admin request from:", req.socket.remoteAddress, req.socket.localAddress)
-    return req.socket.remoteAddress+req.socket.localAddress === "::1::1"
-}
+app.use(session({ secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: true }));
+
+app.get("/login/github", (req, res) => {
+  const redirect_uri = `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&scope=read:user`;
+  res.redirect(redirect_uri);
+});
+
+// Handle GitHub callback
+app.get("/auth/github/callback", async (req, res) => {
+  try {
+    const code = req.query.code;
+    // Validate authorization code
+    if (!code) return res.status(400).send("Missing authorization code");
+
+    // Exchange code for access token
+    const tokenRes = await fetch(`https://github.com/login/oauth/access_token`, {
+      method: "POST",
+      headers: { 
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code
+      })
+    });
+    
+    // Handle GitHub API errors
+    if (!tokenRes.ok) {
+      const error = await tokenRes.text();
+      console.error(`GitHub token error [${tokenRes.status}]:`, error);
+      return res.status(502).send("GitHub authentication failed");
+    }
+
+    const tokenData = await tokenRes.json();
+    const access_token = tokenData.access_token;
+    
+    // Validate access token
+    if (!access_token) {
+      console.error("No access token in response:", tokenData);
+      return res.status(500).send("Authentication failed");
+    }
+
+    // Get user info with proper authorization header
+    const userRes = await fetch("https://api.github.com/user", {
+      headers: { Authorization: `Bearer ${access_token}` } // Fixed to use Bearer
+    });
+
+    // Handle user request errors
+    if (!userRes.ok) {
+      const error = await userRes.text();
+      console.error(`GitHub user error [${userRes.status}]:`, error);
+      return res.status(502).send("Failed to fetch user info");
+    }
+
+    const user = await userRes.json();
+    
+    // Validate user data
+    if (!user || !user.login) {
+      console.error("Invalid user data:", user);
+      return res.status(500).send("Authentication failed");
+    }
+
+    if (adminList.includes(user.login)) {
+      req.session.isAdmin = true;
+      
+      // Properly save session before redirect
+      req.session.save(err => {
+        if (err) {
+          console.error("Session save error:", err);
+          return res.status(500).send("Internal server error");
+        }
+        
+        const redirectPath = req.session.returnTo || "/";
+        delete req.session.returnTo;
+        res.redirect(redirectPath);
+      });
+    } else {
+      console.warn(`Unauthorized access attempt by: ${user.login}`);
+      res.status(403).send("Forbidden: You are not an administrator");
+    }
+  } catch (error) {
+    console.error("Authentication error:", error);
+    res.status(500).send("Internal server error");
+  }
+})
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'chat.html'));
 });
 
 app.get('/control-panel', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    console.log(req.session.isAdmin)
+    if (!req.session.isAdmin) {
+        req.session.returnTo = "/control-panel";
+        return res.redirect("/login/github");
+    };
     res.sendFile(path.join(__dirname, 'public', 'control-panel.html'));
 });
 
@@ -201,7 +292,7 @@ app.get('/paths', (req, res) => {
 
 // Add a new chat room (Admin Only)
 app.post('/add-room', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
 
     const { path } = req.body;
     createRoom(path);
@@ -218,7 +309,7 @@ app.get('/clients/:path', (req, res) => {
     if (!room || !room.clients) {
         res.json([])
     } else {
-        if (isAdmin(req)) {
+        if (req.session.isAdmin) {
             let data = Array.from(Object.entries(room.clients)).map(([clientId, value]) => ({
                 clientId: clientId,
                 ws: value.ws,
@@ -237,7 +328,7 @@ app.get('/clients/:path', (req, res) => {
 });
 
 app.get('/chat-logs/:path', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     
     const path = req.params.path;
     let room = getRoom(path);
@@ -248,7 +339,7 @@ app.get('/chat-logs/:path', (req, res) => {
 
 // Clear all messages in a room
 app.post('/clear-messages/:path', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     if (room) {
@@ -262,13 +353,13 @@ app.post('/clear-messages/:path', (req, res) => {
 
 // Ban a user from a room
 app.post('/ban-client/:path', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     const { ip } = req.body;
     if (!ip) return res.status(400).json({ success: false, message: 'Invalid IP' });
 
-    room.BannedIPs.push(ip);
+    room.bannedIPs.push(ip);
     connectedUsers.forEach((client, clientId) => {
         if (client.ip === ip) {
             client.ws.close();
@@ -280,7 +371,7 @@ app.post('/ban-client/:path', (req, res) => {
 
 // Ban a user from a room
 app.post('/gl-ban-client/', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     const { ip } = req.body;
     if (!ip) return res.status(400).json({ success: false, message: 'Invalid IP' });
 
@@ -296,7 +387,7 @@ app.post('/gl-ban-client/', (req, res) => {
 
 // Save chat history
 app.post('/save-chat', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     try {
         fs.writeFileSync(CHAT_LOG_FILE, JSON.stringify({paths: paths, glBannedIPs: glBannedIPs}, null, 2));
         res.json({ success: true, message: 'Chat saved!' });
@@ -310,7 +401,7 @@ app.post('/delete-message/:path', (req, res) => {
     const path = req.params.path;
     let room = getRoom(path);
     const { index } = req.body;
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     if (index >= 0 && index < room.messages.length) {
         room.messages.splice(index, 1)
         broadcast("clear", path, { history: getMessages(path) });
@@ -322,7 +413,7 @@ app.post('/delete-message/:path', (req, res) => {
 
 // Toggle anonymous mode
 app.post('/anonymous/:path', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     room.settings.anonymous = req.body.anonymous === true;
@@ -332,17 +423,17 @@ app.post('/anonymous/:path', (req, res) => {
 
 // Toggle anonymous mode
 app.post('/characterLimit/:path', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     room.settings.characterLimit = req.body.characterLimit;
-    broadcast("characterLimit", path, { value: characterLimit });
+    broadcast("characterLimit", path, { value: room.settings.characterLimit });
     res.json({ success: true, message: `characterLimit mode is ${room.settings.characterLimit}` });
 });
 
 // Kick a user from a room
 app.post('/kick-client/:path', (req, res) => {
-    if (!isAdmin(req)) return res.status(403).json({ success: false, message: 'Forbidden' });
+    if (!req.session.isAdmin) return res.status(403).json({ success: false, message: 'Forbidden' });
     const path = req.params.path;
     let room = getRoom(path);
     const { clientId } = req.body;
@@ -364,6 +455,6 @@ function broadcastAll(type, data) {
 }
 
 
-server.listen(8080, () => {
-    console.log(`Server running on http://${hostIP}:8080`);
+server.listen(process.env.port, () => {
+    console.log(`Server running on http://${hostIP}:${process.env.port}`);
 });
