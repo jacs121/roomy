@@ -257,7 +257,7 @@
         let characterLimit = 0
 
         async function initUser() {
-            const response = await fetch('/me');
+            const response = await fetch('/me', {method: 'GET'});
             if (response.ok) {
                 const data = await response.json();
                 username = data.username;
