@@ -228,9 +228,9 @@
 
 
     
-    <h2>Socket Chat</h2>
+    <h2>Roomy</h2>
     <select id="pathSelect" onchange="updateRooms(this.options[this.selectedIndex].value)"></select>
-    <input type="text" id="username" placeholder="Enter your name">
+    <a id="username">username: unknown</a>
     <button id="joinButton" onclick="joinChat()">Join</button>
     
     <div id="messages"></div>
@@ -252,9 +252,21 @@
           });
         let ws;
         let timestamp = ""
-        let username = "";
+        let username = null;
         let selectedPath = ""
         let characterLimit = 0
+
+        async function initUser() {
+            const response = await fetch('/me');
+            if (response.ok) {
+                const data = await response.json();
+                username = data.username;
+                document.getElementById('username').innerText = `Logged in as: ${username}`;
+            } else {
+                window.location.href = '/login/github';
+            }
+        }
+
         
         async function loadPaths() {
             let res = await fetch('/paths', {method: 'GET'});
@@ -331,8 +343,6 @@
 
 
         async function joinChat() {
-            const input = document.getElementById("username");
-            username = input.value.trim();
             let usernames = []
             await fetch(`/clients/${selectedPath}`, {method: 'GET'})
             .then(response => response.json())
@@ -340,18 +350,11 @@
                 data.forEach((client) => usernames.push(client.username))
             })
 
-            if (!selectedPath || !username) {
-                alert("Please enter a room name and a username.");
+            if (!selectedPath) {
+                alert("Please enter a room name.");
                 return;
             }
 
-            if (usernames.includes(username)) {
-                alert("username already taken.");
-                return;
-            }
-
-
-            input.disabled = true;
             document.getElementById("joinButton").disabled = true;
             document.getElementById("messageInput").disabled = false;
             document.getElementById("fileInput").disabled = false;
@@ -361,7 +364,8 @@
 
             ws = new WebSocket((window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host);
 
-            ws.onopen = () => {
+            ws.onopen = async () => {
+                await initUser()
                 addMessage(`Connected as ${username} in room ${selectedPath}`);
                 setInterval(() => {
                     if (ws.readyState === WebSocket.OPEN) {

@@ -7,6 +7,7 @@ const WebSocket = require('ws');
 const fetch = require("node-fetch");
 const session = require("express-session");
 const dotenv = require("dotenv");
+const cookie = require('cookie');
 
 dotenv.config({path: "process.env"});
 const app = express();
@@ -17,12 +18,6 @@ const paths = {}; // Store nested paths of categories and rooms
 const connectedUsers = {}
 const glBannedIPs = []
 const adminList = process.env.ADMIN_GITHUB_USERNAMES.split(",").map(u => u.trim());
-
-// Get host IP address
-const hostIP = Object.values(os.networkInterfaces())
-    .flat()
-    .filter(iface => iface.family === 'IPv4' && !iface.internal)
-    .map(iface => iface.address)[0] || '127.0.0.1';
 
 app.use(express.json());
 
@@ -100,6 +95,7 @@ app.get("/auth/github/callback", async (req, res) => {
 
     if (adminList.includes(user.login)) {
       req.session.isAdmin = true;
+      req.session.githubUsername = user.login;
       
       // Properly save session before redirect
       req.session.save(err => {
@@ -146,9 +142,17 @@ if (fs.existsSync(CHAT_LOG_FILE)) {
     }
 }
 
+app.get('/me', (req, res) => {
+    if (!session.githubUsername) {
+        return res.redirect("/login/github");
+    };
+    res.json({ username: req.session.githubUsername });
+});
 
 // Handle WebSocket connections
 wss.on('connection', (ws, req) => {
+    const cookies = cookie.parse(req.headers.cookie || '');
+    const sessionID = cookies['connect.sid'];
     const clientId = Math.random().toString(36).substring(7);
     connectedUsers[clientId] = { ws, username: "Unknown", roomPath: "", ip: req.socket.remoteAddress};
 
@@ -170,7 +174,12 @@ wss.on('connection', (ws, req) => {
                 return
             }
 
-            const {path, username } = data;
+            const { path } = data;
+            if (!session.githubUsername) {
+                req.session.returnTo = "/";
+                return res.redirect("/login/github");
+            };
+            const sessionUsername = session.githubUsername || "Unknown";
             let room = getRoom(path);
 
             if (!room) {
@@ -186,8 +195,8 @@ wss.on('connection', (ws, req) => {
             
             if (data.type === "join") {
                 console.log(`New client in path: ${path}, ID: ${clientId}`);
-                room.clients[clientId] = { ws, username: username };
-                connectedUsers[clientId] = { ws, username: username, roomPath: path}
+                room.clients[clientId] = { ws, username: sessionUsername };
+                connectedUsers[clientId] = { ws, username: sessionUsername, roomPath: path}
                 // Send chat history and characterLimit to the new client
                 ws.send(JSON.stringify({ type: "message", data: {history: getMessages(path)} }));
                 console.log({value: room.settings.characterLimit})
@@ -197,7 +206,7 @@ wss.on('connection', (ws, req) => {
             let date = new Date()
             if (data.type === "message") {
                 const msgData = {
-                    username: room.settings.anonymous ? "ANONYMOUS" : username,
+                    username: room.settings.anonymous ? "ANONYMOUS" : sessionUsername,
                     text: data.text,
                     type: "text",
                     timestamp: `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
@@ -206,7 +215,7 @@ wss.on('connection', (ws, req) => {
                 broadcast("message", path, { history: getMessages(path) });
             } else if (data.type === "file") {
                 const fileData = {
-                    username: username,
+                    username: sessionUsername,
                     filename: data.filename,
                     fileType: data.fileType,
                     result: data.result,
@@ -456,5 +465,5 @@ function broadcastAll(type, data) {
 
 
 server.listen(process.env.port, () => {
-    console.log(`Server running on http://${hostIP}:${process.env.port}`);
+    console.log("Server running");
 });
