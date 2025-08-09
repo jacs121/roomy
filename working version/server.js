@@ -179,8 +179,7 @@ wss.on('connection', (ws, req) => {
                 return
             }
 
-            const { path } = data;
-            const sessionUsername = session.githubUsername || "Unknown";
+            const { path, username } = data;
             let room = getRoom(path);
 
             if (!room) {
@@ -196,8 +195,8 @@ wss.on('connection', (ws, req) => {
             
             if (data.type === "join") {
                 console.log(`New client in path: ${path}, ID: ${clientId}`);
-                room.clients[clientId] = { ws, username: sessionUsername };
-                connectedUsers[clientId] = { ws, username: sessionUsername, roomPath: path}
+                room.clients[clientId] = { ws, username: username };
+                connectedUsers[clientId] = { ws, username: username, roomPath: path}
                 // Send chat history and characterLimit to the new client
                 ws.send(JSON.stringify({ type: "message", data: {history: getMessages(path)} }));
                 console.log({value: room.settings.characterLimit})
@@ -207,7 +206,7 @@ wss.on('connection', (ws, req) => {
             let date = new Date()
             if (data.type === "message") {
                 const msgData = {
-                    username: room.settings.anonymous ? "ANONYMOUS" : sessionUsername,
+                    username: room.settings.anonymous ? "ANONYMOUS" : username,
                     text: data.text,
                     type: "text",
                     timestamp: `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${date.getMinutes()}`
@@ -216,7 +215,7 @@ wss.on('connection', (ws, req) => {
                 broadcast("message", path, { history: getMessages(path) });
             } else if (data.type === "file") {
                 const fileData = {
-                    username: sessionUsername,
+                    username: username,
                     filename: data.filename,
                     fileType: data.fileType,
                     result: data.result,
