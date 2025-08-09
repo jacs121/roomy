@@ -226,11 +226,9 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/emoji-mart@latest/dist/browser.js"></script>
 
-
-    
     <h2>Roomy</h2>
     <select id="pathSelect" onchange="updateRooms(this.options[this.selectedIndex].value)"></select>
-    <a id="username">username: unknown</a>
+    <a id="username">username:</a>
     <button id="joinButton" onclick="joinChat()">Join</button>
     
     <div id="messages"></div>
@@ -253,6 +251,7 @@
         let ws;
         let timestamp = ""
         const username = "unknown";
+        document.getElementById('username').innerText = `username: ${username}`
         let selectedPath = ""
         let characterLimit = 0
 
